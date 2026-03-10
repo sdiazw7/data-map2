@@ -10,5 +10,7 @@ public class Invite
     public int MaxUses { get; set; }
     public int UsedCount { get; set; }
 
+    public Guid? TemplateWorkspaceId { get; set; }
+
     public Workspace Workspace { get; set; } = null!;
 }

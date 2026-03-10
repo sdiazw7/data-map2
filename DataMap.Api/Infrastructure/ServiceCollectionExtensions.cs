@@ -25,6 +25,7 @@ public static class ServiceCollectionExtensions
         services.AddDbContext<AppDbContext>(options =>
             options.UseNpgsql(config.GetConnectionString("DefaultConnection")));
 
+        services.AddScoped<IWorkspaceRepository, WorkspaceRepository>();
         services.AddScoped<IInviteRepository, InviteRepository>();
         services.AddScoped<IParticipantRepository, ParticipantRepository>();
         services.AddScoped<ISessionRepository, SessionRepository>();
@@ -36,6 +37,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IMetadataChangeRepository, MetadataChangeRepository>();
 
         services.AddScoped<IInviteService, InviteService>();
+        services.AddScoped<IWorkspaceCopyService, WorkspaceCopyService>();
         services.AddScoped<IMetadataService, MetadataService>();
         services.AddScoped<IBusinessTermService, BusinessTermService>();
         services.AddScoped<IProjectionService, ProjectionService>();

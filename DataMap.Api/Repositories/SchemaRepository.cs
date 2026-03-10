@@ -22,4 +22,11 @@ public class SchemaRepository(AppDbContext db) : ISchemaRepository
         await db.SaveChangesAsync();
         return schema;
     }
+
+    public async Task<List<Schema>> GetAllByWorkspaceAsync(Guid workspaceId)
+    {
+        return await db.Schemas
+            .Where(s => s.WorkspaceId == workspaceId)
+            .ToListAsync();
+    }
 }

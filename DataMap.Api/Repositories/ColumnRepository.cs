@@ -47,4 +47,11 @@ public class ColumnRepository(AppDbContext db) : IColumnRepository
         var affected = await db.SaveChangesAsync();
         return affected > 0;
     }
+
+    public async Task<List<Column>> GetAllByWorkspaceAsync(Guid workspaceId)
+    {
+        return await db.Columns
+            .Where(c => c.WorkspaceId == workspaceId)
+            .ToListAsync();
+    }
 }

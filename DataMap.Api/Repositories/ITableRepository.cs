@@ -6,4 +6,5 @@ public interface ITableRepository
 {
     Task<Table?> GetByNameAsync(Guid workspaceId, Guid schemaId, string name);
     Task<Table> UpsertAsync(Guid workspaceId, Guid schemaId, string name);
+    Task<List<Table>> GetAllByWorkspaceAsync(Guid workspaceId);
 }

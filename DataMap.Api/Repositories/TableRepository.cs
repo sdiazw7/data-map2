@@ -31,4 +31,11 @@ public class TableRepository(AppDbContext db) : ITableRepository
         await db.SaveChangesAsync();
         return table;
     }
+
+    public async Task<List<Table>> GetAllByWorkspaceAsync(Guid workspaceId)
+    {
+        return await db.Tables
+            .Where(t => t.WorkspaceId == workspaceId)
+            .ToListAsync();
+    }
 }

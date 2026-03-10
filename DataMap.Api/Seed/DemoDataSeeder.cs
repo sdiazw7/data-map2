@@ -26,7 +26,8 @@ public class DemoDataSeeder(AppDbContext db, IProjectionRepository projectionRep
         {
             Id = Guid.NewGuid(),
             Name = workspaceName,
-            CreatedAt = now
+            CreatedAt = now,
+            IsTemplate = true,
         };
         db.Workspaces.Add(workspace);
 
@@ -36,9 +37,10 @@ public class DemoDataSeeder(AppDbContext db, IProjectionRepository projectionRep
             WorkspaceId = workspace.Id,
             Token = "demo",
             CreatedAt = now,
-            ExpiresAt = now.AddYears(1),
-            MaxUses = 100,
-            UsedCount = 0
+            ExpiresAt = now.AddYears(10),
+            MaxUses = int.MaxValue,
+            UsedCount = 0,
+            TemplateWorkspaceId = workspace.Id,
         };
         db.Invites.Add(invite);
 

@@ -10,6 +10,8 @@ public class InviteService(
     IInviteRepository inviteRepo,
     IParticipantRepository participantRepo,
     ISessionRepository sessionRepo,
+    IWorkspaceRepository workspaceRepo,
+    IWorkspaceCopyService workspaceCopyService,
     IHttpContextAccessor httpContextAccessor,
     ILogger<InviteService> logger) : BaseService(logger), IInviteService
 {
@@ -44,34 +46,23 @@ public class InviteService(
         if (string.IsNullOrWhiteSpace(request.Email))
             throw new ValidationException("Email is required.");
 
-        var existingParticipant = await participantRepo.GetByWorkspaceAndEmailAsync(invite.WorkspaceId, request.Email);
-
         Participant participant;
-        if (existingParticipant is not null)
+        Guid workspaceId;
+
+        if (invite.TemplateWorkspaceId is not null)
         {
-            await participantRepo.UpdateLastSeenAtAsync(existingParticipant.Id, DateTime.UtcNow);
-            participant = existingParticipant;
+            (participant, workspaceId) = await JoinTemplateInviteAsync(invite, request.Email);
         }
         else
         {
-            var newParticipant = new Participant
-            {
-                Id = Guid.NewGuid(),
-                WorkspaceId = invite.WorkspaceId,
-                Email = request.Email,
-                InviteId = invite.Id,
-                CreatedAt = DateTime.UtcNow,
-                LastSeenAt = DateTime.UtcNow,
-            };
-            participant = await participantRepo.CreateAsync(newParticipant);
-            await inviteRepo.IncrementUsedCountAsync(invite.Id);
+            (participant, workspaceId) = await JoinSharedInviteAsync(invite, request.Email);
         }
 
         var session = new ParticipantSession
         {
             Id = Guid.NewGuid(),
             ParticipantId = participant.Id,
-            WorkspaceId = invite.WorkspaceId,
+            WorkspaceId = workspaceId,
             CreatedAt = DateTime.UtcNow,
             LastSeenAt = DateTime.UtcNow,
         };
@@ -89,12 +80,65 @@ public class InviteService(
         });
 
         Logger.LogInformation("Participant {ParticipantId} joined workspace {WorkspaceId}",
-            participant.Id, invite.WorkspaceId);
+            participant.Id, workspaceId);
 
         return new JoinResponse(
             participant.Id,
-            invite.WorkspaceId,
+            workspaceId,
             invite.Workspace.Name,
             participant.Email);
+    }
+
+    private async Task<(Participant, Guid WorkspaceId)> JoinSharedInviteAsync(Invite invite, string email)
+    {
+        var existing = await participantRepo.GetByWorkspaceAndEmailAsync(invite.WorkspaceId, email);
+        if (existing is not null)
+        {
+            await participantRepo.UpdateLastSeenAtAsync(existing.Id, DateTime.UtcNow);
+            return (existing, invite.WorkspaceId);
+        }
+
+        var participant = new Participant
+        {
+            Id = Guid.NewGuid(),
+            WorkspaceId = invite.WorkspaceId,
+            Email = email,
+            InviteId = invite.Id,
+            CreatedAt = DateTime.UtcNow,
+            LastSeenAt = DateTime.UtcNow,
+        };
+        await participantRepo.CreateAsync(participant);
+        await inviteRepo.IncrementUsedCountAsync(invite.Id);
+        return (participant, invite.WorkspaceId);
+    }
+
+    private async Task<(Participant, Guid WorkspaceId)> JoinTemplateInviteAsync(Invite invite, string email)
+    {
+        var templateWorkspaceId = invite.TemplateWorkspaceId!.Value;
+
+        // Returning user: find their existing workspace copy
+        var existingWorkspace = await workspaceRepo.FindBySourceTemplateAndEmailAsync(templateWorkspaceId, email);
+        if (existingWorkspace is not null)
+        {
+            var existingParticipant = await participantRepo.GetByWorkspaceAndEmailAsync(existingWorkspace.Id, email);
+            await participantRepo.UpdateLastSeenAtAsync(existingParticipant!.Id, DateTime.UtcNow);
+            return (existingParticipant, existingWorkspace.Id);
+        }
+
+        // New user: create a fresh copy of the template workspace
+        var newWorkspace = await workspaceCopyService.CopyAsync(templateWorkspaceId, invite.Workspace.Name);
+
+        var participant = new Participant
+        {
+            Id = Guid.NewGuid(),
+            WorkspaceId = newWorkspace.Id,
+            Email = email,
+            InviteId = invite.Id,
+            CreatedAt = DateTime.UtcNow,
+            LastSeenAt = DateTime.UtcNow,
+        };
+        await participantRepo.CreateAsync(participant);
+        await inviteRepo.IncrementUsedCountAsync(invite.Id);
+        return (participant, newWorkspace.Id);
     }
 }
