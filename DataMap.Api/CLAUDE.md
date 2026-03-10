@@ -8,6 +8,10 @@
 - Prefer interfaces for service and repository dependencies (`ITableService`, `ITableRepository`)
 - Register everything in the DI container at startup
 
+## Health Endpoint
+
+Always include a `GET /health` endpoint returning `{ "status": "ok" }`, exempt from authentication.
+
 ## Endpoint Rules
 
 <!-- Code example included because "thin" is easy to misjudge without a concrete pattern to follow -->

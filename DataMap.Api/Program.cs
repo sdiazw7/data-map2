@@ -21,6 +21,7 @@ app.UseCors();
 app.UseMiddleware<ErrorHandlerMiddleware>();
 app.UseMiddleware<SessionAuthMiddleware>();
 
+HealthEndpoints.Map(app);
 InviteEndpoints.Map(app);
 MetadataEndpoints.Map(app);
 BusinessTermEndpoints.Map(app);

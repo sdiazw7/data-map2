@@ -7,8 +7,9 @@ public class SessionAuthMiddleware(RequestDelegate next)
 {
     public async Task InvokeAsync(HttpContext context, ISessionRepository sessionRepo)
     {
-        // Skip auth for invite paths
-        if (context.Request.Path.StartsWithSegments("/invite"))
+        // Skip auth for public paths
+        if (context.Request.Path.StartsWithSegments("/health") ||
+            context.Request.Path.StartsWithSegments("/invite"))
         {
             await next(context);
             return;
