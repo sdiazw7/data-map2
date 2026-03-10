@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install react-router-dom)",
+      "Bash(\"/c/Users/silvi/src/data-map2/frontend/src/services/metadataService.ts\":*)"
+    ]
+  }
+}

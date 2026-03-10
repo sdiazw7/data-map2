@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="DataMap.Api/DataMap.Api.csproj" />
+  <Project Path="DataMap.Tests/DataMap.Tests.csproj" />
+</Solution>

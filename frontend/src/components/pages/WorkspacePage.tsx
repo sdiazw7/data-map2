@@ -1,0 +1,102 @@
+import { useState } from 'react'
+import { useSession } from '../../hooks/useSession'
+import { useCoverage } from '../../hooks/useCoverage'
+import { useMetadataColumns } from '../../hooks/useMetadataColumns'
+import { useBusinessTerms } from '../../hooks/useBusinessTerms'
+import { useBulkUpdate } from '../../hooks/useBulkUpdate'
+import { mapTermToColumn } from '../../services/businessTermService'
+import type { ColumnUpdateRequest } from '../../types/api'
+import CoverageBanner from '../coverage/CoverageBanner'
+import GridToolbar from '../grid/GridToolbar'
+import MetadataGrid from '../grid/MetadataGrid'
+import CsvUploadModal from '../upload/CsvUploadModal'
+import LoadingSpinner from '../ui/LoadingSpinner'
+import ErrorMessage from '../ui/ErrorMessage'
+
+export default function WorkspacePage() {
+  const { session } = useSession()
+
+  const [search, setSearch] = useState('')
+  const [undocumentedOnly, setUndocumentedOnly] = useState(false)
+  const [uploadOpen, setUploadOpen] = useState(false)
+
+  const { coverage, reload: reloadCoverage } = useCoverage()
+  const { columns, isLoading, error, reload: reloadColumns } = useMetadataColumns({
+    search,
+    undocumented_only: undocumentedOnly,
+  })
+  const { terms } = useBusinessTerms()
+  const { mutate } = useBulkUpdate()
+
+  async function handleUpdate(update: ColumnUpdateRequest) {
+    await mutate([update])
+    reloadCoverage()
+  }
+
+  async function handleTermMap(columnId: string, termId: string) {
+    await mapTermToColumn({ termId, columnId })
+    reloadColumns()
+    reloadCoverage()
+  }
+
+  if (!session) {
+    return (
+    <div className="flex items-center justify-center h-screen text-gray-500">
+      No active session. Please use your invite link to join a workspace
+    </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col h-screen">
+      <header className="flex items-center px-4 py-3 border-b border-gray-200 bg-white shrink-0">
+        <h1 className="text-lg font-semibold text-gray-900">{session.workspaceName}</h1>
+      </header>
+
+      {coverage && (
+        <div className="shrink-0">
+          <CoverageBanner coverage={coverage} />
+        </div>
+      )}
+
+      <div className="shrink-0">
+        <GridToolbar
+          onSearchChange={setSearch}
+          onUndocumentedOnlyChange={setUndocumentedOnly}
+          onUploadClick={() => setUploadOpen(true)}
+        />
+      </div>
+
+      <div className="flex-1 relative overflow-hidden">
+        {isLoading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-white/70 z-10">
+            <LoadingSpinner />
+          </div>
+        )}
+        {error && !isLoading && (
+          <div className="flex items-center justify-center h-full">
+            <ErrorMessage message={error} />
+          </div>
+        )}
+        {!error && (
+          <MetadataGrid
+            columns={columns}
+            terms={terms}
+            onUpdate={handleUpdate}
+            onTermMap={handleTermMap}
+          />
+        )}
+      </div>
+
+      {uploadOpen && (
+        <CsvUploadModal
+          onClose={() => setUploadOpen(false)}
+          onSuccess={() => {
+            reloadColumns()
+            reloadCoverage()
+          }}
+        />
+      )}
+    </div>
+  )
+}
