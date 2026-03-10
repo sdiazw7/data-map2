@@ -9,3 +9,5 @@ public class InviteUsageExceededException() : Exception("This invite has reached
 public class VersionConflictException() : Exception("The column was modified by someone else. Please refresh and try again.");
 
 public class ValidationException(string message) : Exception(message);
+
+public class TemplateWorkspaceNotFoundException() : Exception("Template workspace not found.");

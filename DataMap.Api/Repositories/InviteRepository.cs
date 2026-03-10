@@ -19,4 +19,11 @@ public class InviteRepository(AppDbContext db) : IInviteRepository
             .Where(i => i.Id == inviteId)
             .ExecuteUpdateAsync(s => s.SetProperty(i => i.UsedCount, i => i.UsedCount + 1));
     }
+
+    public async Task<Invite> CreateAsync(Invite invite)
+    {
+        db.Invites.Add(invite);
+        await db.SaveChangesAsync();
+        return invite;
+    }
 }

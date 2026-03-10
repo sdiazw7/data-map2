@@ -27,6 +27,10 @@ public class ErrorHandlerMiddleware(RequestDelegate next, ILogger<ErrorHandlerMi
         {
             await WriteErrorAsync(context, StatusCodes.Status409Conflict, "VERSION_CONFLICT", ex.Message);
         }
+        catch (TemplateWorkspaceNotFoundException ex)
+        {
+            await WriteErrorAsync(context, StatusCodes.Status404NotFound, "TEMPLATE_WORKSPACE_NOT_FOUND", ex.Message);
+        }
         catch (ValidationException ex)
         {
             await WriteErrorAsync(context, StatusCodes.Status400BadRequest, "VALIDATION_ERROR", ex.Message);

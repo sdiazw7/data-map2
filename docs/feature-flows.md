@@ -8,14 +8,15 @@ Developer reference for how each feature works end-to-end. Covers the full stack
 
 1. [Architecture Overview](#architecture-overview)
 2. [Session & Authentication](#session--authentication)
-3. [Joining via Invite Link](#joining-via-invite-link)
-4. [Workspace & Metadata Grid](#workspace--metadata-grid)
-5. [Editing Columns](#editing-columns)
-6. [CSV Upload](#csv-upload)
-7. [Business Terms](#business-terms)
-8. [Coverage Tracking](#coverage-tracking)
-9. [Demo Data Seeding](#demo-data-seeding)
-10. [The Projection Table](#the-projection-table)
+3. [Creating an Invite Link](#creating-an-invite-link)
+4. [Joining via Invite Link](#joining-via-invite-link)
+5. [Workspace & Metadata Grid](#workspace--metadata-grid)
+6. [Editing Columns](#editing-columns)
+7. [CSV Upload](#csv-upload)
+8. [Business Terms](#business-terms)
+9. [Coverage Tracking](#coverage-tracking)
+10. [Demo Data Seeding](#demo-data-seeding)
+11. [The Projection Table](#the-projection-table)
 
 ---
 
@@ -72,6 +73,73 @@ All protected endpoints extract `WorkspaceId` from `context.Items` to scope quer
 - `DataMap.Api/Repositories/SessionRepository.cs`
 - `frontend/src/hooks/useSession.ts`
 - `frontend/src/utils/api.ts`
+
+---
+
+## Creating an Invite Link
+
+Invite creation is a protected operation — the caller must have an active session (i.e. already be a participant in a workspace).
+
+### Endpoint
+
+```
+POST /invites
+```
+
+The workspace is taken from the caller's session; it does not need to be in the request body.
+
+### Request body
+
+```json
+{
+  "maxUses": 50,
+  "expiresAt": "2027-01-01T00:00:00Z",
+  "templateWorkspaceId": null
+}
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `maxUses` | Yes | How many times the link can be used (minimum 1). |
+| `expiresAt` | Yes | UTC datetime after which the link is no longer valid. Must be in the future. |
+| `templateWorkspaceId` | No | If set, each new user gets their own copy of this workspace instead of joining a shared one. The referenced workspace must exist and have `IsTemplate = true`. |
+
+### Response (`201 Created`)
+
+```json
+{
+  "id": "...",
+  "token": "aB3xQ7...",
+  "workspaceId": "...",
+  "expiresAt": "2027-01-01T00:00:00Z",
+  "maxUses": 50,
+  "templateWorkspaceId": null
+}
+```
+
+The `token` is a 32-byte cryptographically random value encoded as base64url. Share it as `/invite/{token}`.
+
+### Backend flow (`InviteService.CreateAsync`)
+
+1. Validates `MaxUses >= 1` and `ExpiresAt` is in the future.
+2. If `TemplateWorkspaceId` is provided, fetches the workspace and verifies `IsTemplate = true`. Throws `TemplateWorkspaceNotFoundException` (→ `404`) if not found or not a template.
+3. Generates a URL-safe token: `RandomNumberGenerator.GetBytes(32)` encoded as base64url.
+4. Persists the `Invite` record and returns `CreateInviteResponse`.
+
+### Two invite modes
+
+| Mode | `templateWorkspaceId` | Join behaviour |
+|---|---|---|
+| Shared | `null` | All users join the same workspace. |
+| Template | set to a template workspace ID | Each new user receives their own copy of the template workspace. |
+
+**Key files:**
+- `DataMap.Api/Endpoints/InviteEndpoints.cs`
+- `DataMap.Api/Services/InviteService.cs` — `CreateAsync`
+- `DataMap.Api/Repositories/InviteRepository.cs` — `CreateAsync`
+- `DataMap.Api/Repositories/WorkspaceRepository.cs` — `GetByIdAsync`
+- `DataMap.Api/DTOs/CreateInviteRequest.cs`
+- `DataMap.Api/DTOs/CreateInviteResponse.cs`
 
 ---
 

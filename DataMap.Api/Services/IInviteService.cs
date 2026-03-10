@@ -6,4 +6,5 @@ public interface IInviteService
 {
     Task<InviteDto> GetAsync(string token);
     Task<JoinResponse> JoinAsync(string token, JoinRequest request);
+    Task<CreateInviteResponse> CreateAsync(CreateInviteRequest request, Guid workspaceId);
 }

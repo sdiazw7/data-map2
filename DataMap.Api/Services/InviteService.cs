@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using DataMap.Api.DTOs;
 using DataMap.Api.Exceptions;
 using DataMap.Api.Models;
@@ -87,6 +88,48 @@ public class InviteService(
             workspaceId,
             invite.Workspace.Name,
             participant.Email);
+    }
+
+    public async Task<CreateInviteResponse> CreateAsync(CreateInviteRequest request, Guid workspaceId)
+    {
+        if (request.MaxUses < 1)
+            throw new ValidationException("MaxUses must be at least 1.");
+
+        if (request.ExpiresAt <= DateTime.UtcNow)
+            throw new ValidationException("ExpiresAt must be in the future.");
+
+        if (request.TemplateWorkspaceId is not null)
+        {
+            var template = await workspaceRepo.GetByIdAsync(request.TemplateWorkspaceId.Value);
+            if (template is null || !template.IsTemplate)
+                throw new TemplateWorkspaceNotFoundException();
+        }
+
+        var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
+            .Replace('+', '-').Replace('/', '_').TrimEnd('=');
+
+        var invite = new Invite
+        {
+            Id = Guid.NewGuid(),
+            WorkspaceId = workspaceId,
+            Token = token,
+            CreatedAt = DateTime.UtcNow,
+            ExpiresAt = request.ExpiresAt,
+            MaxUses = request.MaxUses,
+            UsedCount = 0,
+            TemplateWorkspaceId = request.TemplateWorkspaceId,
+        };
+        await inviteRepo.CreateAsync(invite);
+
+        Logger.LogInformation("Invite {InviteId} created for workspace {WorkspaceId}", invite.Id, workspaceId);
+
+        return new CreateInviteResponse(
+            invite.Id,
+            invite.Token,
+            invite.WorkspaceId,
+            invite.ExpiresAt,
+            invite.MaxUses,
+            invite.TemplateWorkspaceId);
     }
 
     private async Task<(Participant, Guid WorkspaceId)> JoinSharedInviteAsync(Invite invite, string email)

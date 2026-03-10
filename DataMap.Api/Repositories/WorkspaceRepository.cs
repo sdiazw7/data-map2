@@ -13,6 +13,11 @@ public class WorkspaceRepository(AppDbContext db) : IWorkspaceRepository
         return workspace;
     }
 
+    public async Task<Workspace?> GetByIdAsync(Guid id)
+    {
+        return await db.Workspaces.FindAsync(id);
+    }
+
     public async Task<Workspace?> FindBySourceTemplateAndEmailAsync(Guid templateWorkspaceId, string email)
     {
         return await db.Workspaces
