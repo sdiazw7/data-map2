@@ -30,26 +30,26 @@ public class ProjectionRepository(AppDbContext db) : IProjectionRepository
             .ExecuteDeleteAsync();
 
         await db.Database.ExecuteSqlRawAsync(@"
-            INSERT INTO column_catalog_editor
-                (workspace_id, column_id, schema_name, table_name, column_name, data_type, example_value, description, business_term, owner, version)
+            INSERT INTO app.""ColumnCatalogEditor""
+                (""WorkspaceId"", ""ColumnId"", ""SchemaName"", ""TableName"", ""ColumnName"", ""DataType"", ""ExampleValue"", ""Description"", ""BusinessTerm"", ""Owner"", ""Version"")
             SELECT
-                col.workspace_id,
-                col.id,
-                s.name,
-                t.name,
-                col.name,
-                col.data_type,
-                col.example_value,
-                col.description,
-                bt.name,
-                col.owner,
-                col.version
-            FROM columns col
-            JOIN tables t ON t.id = col.table_id
-            JOIN schemas s ON s.id = t.schema_id
-            LEFT JOIN term_column_mappings tcm ON tcm.column_id = col.id
-            LEFT JOIN business_terms bt ON bt.id = tcm.term_id
-            WHERE col.workspace_id = {0}",
+                col.""WorkspaceId"",
+                col.""Id"",
+                s.""Name"",
+                t.""Name"",
+                col.""Name"",
+                col.""DataType"",
+                col.""ExampleValue"",
+                col.""Description"",
+                bt.""Name"",
+                col.""Owner"",
+                col.""Version""
+            FROM app.""Columns"" col
+            JOIN app.""Tables"" t ON t.""Id"" = col.""TableId""
+            JOIN app.""Schemas"" s ON s.""Id"" = t.""SchemaId""
+            LEFT JOIN app.""TermColumnMappings"" tcm ON tcm.""ColumnId"" = col.""Id""
+            LEFT JOIN app.""BusinessTerms"" bt ON bt.""Id"" = tcm.""TermId""
+            WHERE col.""WorkspaceId"" = {0}",
             workspaceId);
     }
 
