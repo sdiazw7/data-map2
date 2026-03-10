@@ -27,7 +27,17 @@ export default function CsvUploadModal({ onClose, onSuccess }: Props) {
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Upload CSV</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900">Upload CSV</h2>
+          <a
+            href="/csv-guide"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-blue-600 hover:underline"
+          >
+            How to prepare your file
+          </a>
+        </div>
         <form onSubmit={handleSubmit}>
           <div className="mb-4">
             <label htmlFor="csv-file" className="block text-sm font-medium text-gray-700 mb-1">
