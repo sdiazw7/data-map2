@@ -11,8 +11,14 @@ public class DemoDataSeeder(AppDbContext db, IProjectionRepository projectionRep
     {
         var workspaceName = "Acme Commerce Analytics";
 
-        if (await db.Workspaces.AnyAsync(w => w.Name == workspaceName))
+        var existingWorkspace = await db.Workspaces.FirstOrDefaultAsync(w => w.Name == workspaceName);
+        if (existingWorkspace is not null)
+        {
+            var hasProjection = await db.ColumnCatalogEditor.AnyAsync(c => c.WorkspaceId == existingWorkspace.Id);
+            if (!hasProjection)
+                await projectionRepo.RefreshAsync(existingWorkspace.Id);
             return;
+        }
 
         var now = DateTime.UtcNow;
 
