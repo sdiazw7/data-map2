@@ -48,11 +48,7 @@ export default function WorkspacePage() {
   }
 
   return (
-    <div className="flex flex-col h-screen">
-      <header className="flex items-center px-4 py-3 border-b border-gray-200 bg-white shrink-0">
-        <h1 className="text-lg font-semibold text-gray-900">{session.workspaceName}</h1>
-      </header>
-
+    <div className="flex flex-col flex-1 overflow-hidden">
       {coverage && (
         <div className="shrink-0">
           <CoverageBanner coverage={coverage} />

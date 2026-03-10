@@ -62,7 +62,11 @@ export default function InvitePage() {
   }
 
   if (!invite) {
-    return null
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <p className="text-gray-600">Invite not found. Please check your link and try again.</p>
+      </div>
+    )
   }
 
   return (

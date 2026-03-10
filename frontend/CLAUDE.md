@@ -14,6 +14,8 @@ frontend/
 
 New pages go in `components/pages/` and must be registered in `App.tsx`.
 
+`App.tsx` must include a global `AppHeader` component that renders on every page.
+
 ## Separation of Concerns
 
 | Layer        | Responsibility                            |
@@ -41,8 +43,10 @@ useEffect(() => { fetch('/api/tables').then(...) }, []);
 - Functional components only (no class components)
 - Small, single-purpose — split when a component does too much
 - Hierarchy: Page → Feature components → Reusable UI components
-- Always handle loading and error states
-- Pages that require authentication or a session must render a user-facing message when the required context is absent — never return `null` and never redirect to `/`
+- Always handle loading, error, and empty states — every state a page can be in must show something meaningful to the user
+- Never return `null` from a page component — always render a user-facing message
+- Routes must use the correct path shape including any required parameters (e.g. `/resource/:id`) — document expected URL parameters in a comment if non-obvious
+- `App.tsx` must always include a `path="*"` catch-all route rendering a "page not found" message
 
 ## State Management
 
