@@ -7,7 +7,7 @@ namespace DataMap.Api.Repositories;
 public class ProjectionRepository(AppDbContext db) : IProjectionRepository
 {
     public async Task<List<ColumnCatalogEditor>> QueryAsync(
-        Guid workspaceId, int limit, int offset, string? search, bool undocumentedOnly, string? tableName)
+        Guid workspaceId, int limit, int offset, string? search, bool undocumentedOnly, string? tableName, string sortBy, string sortDir)
     {
         var query = db.ColumnCatalogEditor.Where(c => c.WorkspaceId == workspaceId);
 
@@ -22,6 +22,17 @@ public class ProjectionRepository(AppDbContext db) : IProjectionRepository
 
         if (!string.IsNullOrWhiteSpace(tableName))
             query = query.Where(c => c.TableName == tableName);
+
+        var descending = sortDir == "desc";
+        IOrderedQueryable<ColumnCatalogEditor> ordered = sortBy switch
+        {
+            "table_name" => descending ? query.OrderByDescending(c => c.TableName) : query.OrderBy(c => c.TableName),
+            "data_type" => descending ? query.OrderByDescending(c => c.DataType) : query.OrderBy(c => c.DataType),
+            "owner" => descending ? query.OrderByDescending(c => c.Owner) : query.OrderBy(c => c.Owner),
+            _ => descending ? query.OrderByDescending(c => c.ColumnName) : query.OrderBy(c => c.ColumnName),
+        };
+        // Tie-breaker keeps offset pagination deterministic across pages when the sort column repeats values.
+        query = ordered.ThenBy(c => c.ColumnId);
 
         return await query.Skip(offset).Take(limit).ToListAsync();
     }

@@ -29,7 +29,7 @@ export function useMetadataColumns(query: ColumnsQuery): UseMetadataColumnsResul
       })
       .finally(() => setIsLoading(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query.search, query.undocumented_only, query.table_name, query.limit, query.offset, tick])
+  }, [query.search, query.undocumented_only, query.table_name, query.sort_by, query.sort_dir, query.limit, query.offset, tick])
 
   return { columns, isLoading, error, reload }
 }

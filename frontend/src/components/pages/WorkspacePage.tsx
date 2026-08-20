@@ -6,6 +6,7 @@ import { useBusinessTerms } from '../../hooks/useBusinessTerms'
 import { useTableNames } from '../../hooks/useTableNames'
 import { useBulkUpdate } from '../../hooks/useBulkUpdate'
 import { mapTermToColumn } from '../../services/businessTermService'
+import type { SortField, SortDir } from '../../services/metadataService'
 import type { ColumnUpdateRequest } from '../../types/api'
 import CoverageBanner from '../coverage/CoverageBanner'
 import GridToolbar from '../grid/GridToolbar'
@@ -21,6 +22,8 @@ export default function WorkspacePage() {
   const [search, setSearch] = useState('')
   const [undocumentedOnly, setUndocumentedOnly] = useState(false)
   const [tableName, setTableName] = useState('')
+  const [sortBy, setSortBy] = useState<SortField>('column_name')
+  const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [uploadOpen, setUploadOpen] = useState(false)
   const [termsOpen, setTermsOpen] = useState(false)
 
@@ -29,6 +32,8 @@ export default function WorkspacePage() {
     search,
     undocumented_only: undocumentedOnly,
     table_name: tableName || undefined,
+    sort_by: sortBy,
+    sort_dir: sortDir,
   })
   const { terms, isLoading: termsLoading, error: termsError, create: createTerm } = useBusinessTerms()
   const { tableNames, reload: reloadTableNames } = useTableNames()
@@ -51,6 +56,15 @@ export default function WorkspacePage() {
     await mapTermToColumn({ termId, columnId })
     reloadColumns()
     reloadCoverage()
+  }
+
+  function handleSortChange(field: SortField) {
+    if (field === sortBy) {
+      setSortDir(dir => (dir === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortBy(field)
+      setSortDir('asc')
+    }
   }
 
   if (!session) {
@@ -98,6 +112,9 @@ export default function WorkspacePage() {
             terms={terms}
             onUpdate={handleUpdate}
             onTermMap={handleTermMap}
+            sortBy={sortBy}
+            sortDir={sortDir}
+            onSortChange={handleSortChange}
           />
         )}
       </div>

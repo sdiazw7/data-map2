@@ -1,12 +1,17 @@
 import type { ColumnGridRow, ColumnUpdateRequest, CoverageResponse } from '../types/api'
 import { apiFetch } from '../utils/api'
 
+export type SortField = 'column_name' | 'table_name' | 'data_type' | 'owner'
+export type SortDir = 'asc' | 'desc'
+
 export type ColumnsQuery = {
   limit?: number
   offset?: number
   search?: string
   undocumented_only?: boolean
   table_name?: string
+  sort_by?: SortField
+  sort_dir?: SortDir
 }
 
 export async function getColumns(query: ColumnsQuery): Promise<ColumnGridRow[]> {
@@ -16,6 +21,8 @@ export async function getColumns(query: ColumnsQuery): Promise<ColumnGridRow[]> 
   if (query.search) params.set('search', query.search)
   if (query.undocumented_only) params.set('undocumented_only', 'true')
   if (query.table_name) params.set('table_name', query.table_name)
+  if (query.sort_by) params.set('sort_by', query.sort_by)
+  if (query.sort_dir) params.set('sort_dir', query.sort_dir)
   return apiFetch<ColumnGridRow[]>(`/metadata/columns?${params}`)
 }
 

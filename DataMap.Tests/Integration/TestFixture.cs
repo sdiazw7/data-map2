@@ -42,7 +42,7 @@ public class TestFixture : WebApplicationFactory<Program>
 
         // Projection repo is a no-op (raw SQL incompatible with in-memory DB)
         ProjectionRepo.Setup(r => r.RefreshAsync(It.IsAny<Guid>())).Returns(Task.CompletedTask);
-        ProjectionRepo.Setup(r => r.QueryAsync(It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<bool>())).ReturnsAsync([]);
+        ProjectionRepo.Setup(r => r.QueryAsync(It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<string>())).ReturnsAsync([]);
         ProjectionRepo.Setup(r => r.GetCoverageCountsAsync(It.IsAny<Guid>())).ReturnsAsync((0, 0));
     }
 

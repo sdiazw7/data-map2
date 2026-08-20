@@ -5,5 +5,7 @@ public record MetadataColumnsQuery(
     int Offset = 0,
     string? Search = null,
     bool UndocumentedOnly = false,
-    string? TableName = null
+    string? TableName = null,
+    string SortBy = "column_name",
+    string SortDir = "asc"
 );

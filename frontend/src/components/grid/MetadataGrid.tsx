@@ -7,6 +7,7 @@ import {
 } from '@tanstack/react-table'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { ColumnGridRow, ColumnUpdateRequest, BusinessTermDto } from '../../types/api'
+import type { SortField, SortDir } from '../../services/metadataService'
 import GridCell from './GridCell'
 import BusinessTermCell from './BusinessTermCell'
 
@@ -15,12 +16,30 @@ type Props = {
   terms: BusinessTermDto[]
   onUpdate: (update: ColumnUpdateRequest) => void
   onTermMap: (columnId: string, termId: string) => void
+  sortBy: SortField
+  sortDir: SortDir
+  onSortChange: (field: SortField) => void
 }
 
 const columnHelper = createColumnHelper<ColumnGridRow>()
 
-export default function MetadataGrid({ columns: rows, terms, onUpdate, onTermMap }: Props) {
+export default function MetadataGrid({ columns: rows, terms, onUpdate, onTermMap, sortBy, sortDir, onSortChange }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
+
+  function sortableHeader(label: string, field: SortField) {
+    const isActive = sortBy === field
+    return (
+      <button
+        type="button"
+        onClick={() => onSortChange(field)}
+        className="flex items-center gap-1 font-semibold uppercase tracking-wider hover:text-gray-900"
+        aria-label={`Sort by ${label}`}
+      >
+        {label}
+        {isActive && <span aria-hidden="true">{sortDir === 'asc' ? '▲' : '▼'}</span>}
+      </button>
+    )
+  }
 
   const tableColumns = [
     columnHelper.accessor('schemaName', {
@@ -28,15 +47,15 @@ export default function MetadataGrid({ columns: rows, terms, onUpdate, onTermMap
       cell: info => info.getValue() ?? '',
     }),
     columnHelper.accessor('tableName', {
-      header: 'Table',
+      header: () => sortableHeader('Table', 'table_name'),
       cell: info => info.getValue() ?? '',
     }),
     columnHelper.accessor('columnName', {
-      header: 'Column',
+      header: () => sortableHeader('Column', 'column_name'),
       cell: info => info.getValue() ?? '',
     }),
     columnHelper.accessor('dataType', {
-      header: 'Type',
+      header: () => sortableHeader('Type', 'data_type'),
       cell: info => info.getValue() ?? '',
     }),
     columnHelper.display({
@@ -77,7 +96,7 @@ export default function MetadataGrid({ columns: rows, terms, onUpdate, onTermMap
     }),
     columnHelper.display({
       id: 'owner',
-      header: 'Owner',
+      header: () => sortableHeader('Owner', 'owner'),
       cell: ({ row }) => (
         <GridCell
           value={row.original.owner}

@@ -19,15 +19,25 @@ public class MetadataService(
     IProjectionService projectionService,
     ILogger<MetadataService> logger) : BaseService(logger), IMetadataService
 {
+    private static readonly HashSet<string> SortableColumns = ["column_name", "table_name", "data_type", "owner"];
+
     public async Task<List<ColumnGridRow>> GetColumnsAsync(Guid workspaceId, MetadataColumnsQuery query)
     {
+        if (!SortableColumns.Contains(query.SortBy))
+            throw new Exceptions.ValidationException($"'{query.SortBy}' is not a sortable field. Allowed values: {string.Join(", ", SortableColumns)}.");
+
+        if (query.SortDir != "asc" && query.SortDir != "desc")
+            throw new Exceptions.ValidationException("sort_dir must be 'asc' or 'desc'.");
+
         var rows = await projectionRepo.QueryAsync(
             workspaceId,
             query.Limit,
             query.Offset,
             query.Search,
             query.UndocumentedOnly,
-            query.TableName);
+            query.TableName,
+            query.SortBy,
+            query.SortDir);
 
         return rows.Select(r => new ColumnGridRow(
             r.ColumnId,

@@ -50,7 +50,7 @@ public class MetadataServiceTests
                     DataType = "uuid", Description = "PK", ExampleValue = "abc", Owner = "alice",
                     BusinessTerm = "Order ID", Version = 3 }
         };
-        _projectionRepo.Setup(r => r.QueryAsync(workspaceId, 200, 0, null, false)).ReturnsAsync(rows);
+        _projectionRepo.Setup(r => r.QueryAsync(workspaceId, 200, 0, null, false, null, "column_name", "asc")).ReturnsAsync(rows);
 
         var result = await CreateService().GetColumnsAsync(workspaceId, new MetadataColumnsQuery());
 
@@ -71,7 +71,7 @@ public class MetadataServiceTests
     public async Task GetColumnsAsync_EmptyResult_ReturnsEmptyList()
     {
         var workspaceId = Guid.NewGuid();
-        _projectionRepo.Setup(r => r.QueryAsync(workspaceId, It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<bool>()))
+        _projectionRepo.Setup(r => r.QueryAsync(workspaceId, It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<string>()))
             .ReturnsAsync([]);
 
         var result = await CreateService().GetColumnsAsync(workspaceId, new MetadataColumnsQuery());
@@ -84,11 +84,31 @@ public class MetadataServiceTests
     {
         var workspaceId = Guid.NewGuid();
         var query = new MetadataColumnsQuery(Limit: 50, Offset: 100, Search: "customer", UndocumentedOnly: true);
-        _projectionRepo.Setup(r => r.QueryAsync(workspaceId, 50, 100, "customer", true)).ReturnsAsync([]);
+        _projectionRepo.Setup(r => r.QueryAsync(workspaceId, 50, 100, "customer", true, null, "column_name", "asc")).ReturnsAsync([]);
 
         await CreateService().GetColumnsAsync(workspaceId, query);
 
-        _projectionRepo.Verify(r => r.QueryAsync(workspaceId, 50, 100, "customer", true), Times.Once);
+        _projectionRepo.Verify(r => r.QueryAsync(workspaceId, 50, 100, "customer", true, null, "column_name", "asc"), Times.Once);
+    }
+
+    [Fact]
+    public async Task GetColumnsAsync_SortByDescription_ThrowsValidationException()
+    {
+        var workspaceId = Guid.NewGuid();
+        var query = new MetadataColumnsQuery(SortBy: "description");
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            CreateService().GetColumnsAsync(workspaceId, query));
+    }
+
+    [Fact]
+    public async Task GetColumnsAsync_InvalidSortDir_ThrowsValidationException()
+    {
+        var workspaceId = Guid.NewGuid();
+        var query = new MetadataColumnsQuery(SortDir: "sideways");
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            CreateService().GetColumnsAsync(workspaceId, query));
     }
 
     // ── UploadCsvAsync ───────────────────────────────────────────────────────

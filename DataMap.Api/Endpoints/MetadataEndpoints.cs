@@ -24,10 +24,12 @@ public static class MetadataEndpoints
             int offset = 0,
             string? search = null,
             bool undocumented_only = false,
-            string? table_name = null) =>
+            string? table_name = null,
+            string sort_by = "column_name",
+            string sort_dir = "asc") =>
         {
             var workspaceId = (Guid)ctx.Items["WorkspaceId"]!;
-            var query = new MetadataColumnsQuery(limit, offset, search, undocumented_only, table_name);
+            var query = new MetadataColumnsQuery(limit, offset, search, undocumented_only, table_name, sort_by, sort_dir);
             var result = await svc.GetColumnsAsync(workspaceId, query);
             return Results.Ok(result);
         });
