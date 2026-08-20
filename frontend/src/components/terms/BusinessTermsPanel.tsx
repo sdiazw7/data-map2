@@ -1,10 +1,17 @@
 import { useState } from 'react'
-import { useBusinessTerms } from '../../hooks/useBusinessTerms'
+import type { BusinessTermDto, BusinessTermCreateRequest } from '../../types/api'
 import LoadingSpinner from '../ui/LoadingSpinner'
 import ErrorMessage from '../ui/ErrorMessage'
 
-export default function BusinessTermsPanel() {
-  const { terms, isLoading, error, create } = useBusinessTerms()
+type Props = {
+  terms: BusinessTermDto[]
+  isLoading: boolean
+  error: string | null
+  create: (req: BusinessTermCreateRequest) => Promise<void>
+  onClose: () => void
+}
+
+export default function BusinessTermsPanel({ terms, isLoading, error, create, onClose }: Props) {
   const [name, setName] = useState('')
   const [definition, setDefinition] = useState('')
   const [formError, setFormError] = useState<string | null>(null)
@@ -31,7 +38,17 @@ export default function BusinessTermsPanel() {
 
   return (
     <div className="p-4">
-      <h2 className="text-base font-semibold text-gray-900 mb-4">Business Terms</h2>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-base font-semibold text-gray-900">Business Terms</h2>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="text-gray-400 hover:text-gray-600 focus:outline-none"
+        >
+          &times;
+        </button>
+      </div>
 
       {isLoading && (
         <div className="flex justify-center py-4">

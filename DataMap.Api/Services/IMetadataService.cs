@@ -9,4 +9,5 @@ public interface IMetadataService
     Task UploadCsvAsync(Guid workspaceId, Guid participantId, IFormFile file);
     Task BulkUpdateAsync(Guid workspaceId, Guid participantId, List<ColumnUpdateRequest> updates);
     Task<CoverageResponse> GetCoverageAsync(Guid workspaceId);
+    Task<List<string>> GetTableNamesAsync(Guid workspaceId);
 }

@@ -7,7 +7,7 @@ namespace DataMap.Api.Repositories;
 public class ProjectionRepository(AppDbContext db) : IProjectionRepository
 {
     public async Task<List<ColumnCatalogEditor>> QueryAsync(
-        Guid workspaceId, int limit, int offset, string? search, bool undocumentedOnly)
+        Guid workspaceId, int limit, int offset, string? search, bool undocumentedOnly, string? tableName)
     {
         var query = db.ColumnCatalogEditor.Where(c => c.WorkspaceId == workspaceId);
 
@@ -20,7 +20,20 @@ public class ProjectionRepository(AppDbContext db) : IProjectionRepository
         if (undocumentedOnly)
             query = query.Where(c => c.Description == null || c.Description == string.Empty);
 
+        if (!string.IsNullOrWhiteSpace(tableName))
+            query = query.Where(c => c.TableName == tableName);
+
         return await query.Skip(offset).Take(limit).ToListAsync();
+    }
+
+    public async Task<List<string>> GetDistinctTableNamesAsync(Guid workspaceId)
+    {
+        return await db.ColumnCatalogEditor
+            .Where(c => c.WorkspaceId == workspaceId)
+            .Select(c => c.TableName)
+            .Distinct()
+            .OrderBy(t => t)
+            .ToListAsync();
     }
 
     public async Task RefreshAsync(Guid workspaceId)

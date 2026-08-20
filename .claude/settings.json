@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(dotnet build DataMap.Api/DataMap.Api.csproj)",
-      "Bash(npx vite build)"
+      "Bash(npx vite build)",
+      "Bash(npx tsc *)",
+      "Bash(taskkill //PID 11440 //T //F)",
+      "Bash(netstat -ano)"
     ]
   }
 }

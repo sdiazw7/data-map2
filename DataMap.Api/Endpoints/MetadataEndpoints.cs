@@ -23,11 +23,19 @@ public static class MetadataEndpoints
             int limit = 200,
             int offset = 0,
             string? search = null,
-            bool undocumented_only = false) =>
+            bool undocumented_only = false,
+            string? table_name = null) =>
         {
             var workspaceId = (Guid)ctx.Items["WorkspaceId"]!;
-            var query = new MetadataColumnsQuery(limit, offset, search, undocumented_only);
+            var query = new MetadataColumnsQuery(limit, offset, search, undocumented_only, table_name);
             var result = await svc.GetColumnsAsync(workspaceId, query);
+            return Results.Ok(result);
+        });
+
+        app.MapGet("/metadata/tables", async (HttpContext ctx, IMetadataService svc) =>
+        {
+            var workspaceId = (Guid)ctx.Items["WorkspaceId"]!;
+            var result = await svc.GetTableNamesAsync(workspaceId);
             return Results.Ok(result);
         });
 

@@ -6,6 +6,7 @@ export type ColumnsQuery = {
   offset?: number
   search?: string
   undocumented_only?: boolean
+  table_name?: string
 }
 
 export async function getColumns(query: ColumnsQuery): Promise<ColumnGridRow[]> {
@@ -14,7 +15,12 @@ export async function getColumns(query: ColumnsQuery): Promise<ColumnGridRow[]> 
   if (query.offset !== undefined) params.set('offset', String(query.offset))
   if (query.search) params.set('search', query.search)
   if (query.undocumented_only) params.set('undocumented_only', 'true')
+  if (query.table_name) params.set('table_name', query.table_name)
   return apiFetch<ColumnGridRow[]>(`/metadata/columns?${params}`)
+}
+
+export async function getTableNames(): Promise<string[]> {
+  return apiFetch<string[]>('/metadata/tables')
 }
 
 export async function bulkUpdateColumns(updates: ColumnUpdateRequest[]): Promise<void> {

@@ -32,4 +32,4 @@ npm run dev
 ```
 Runs on `http://localhost:5173`.
 
-With both running, open `http://localhost:5173/`. In dev builds, the root page is a workspace picker that skips the invite flow — pick "Acme Commerce Analytics" to jump straight in. In production, `/` requires an invite link as usual.
+With both running, open `Follow link (ctrl + click)`. In dev builds, the root page is a workspace picker that skips the invite flow — pick "Acme Commerce Analytics" to jump straight in. In production, `/` requires an invite link as usual.

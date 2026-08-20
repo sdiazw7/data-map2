@@ -26,7 +26,8 @@ public class MetadataService(
             query.Limit,
             query.Offset,
             query.Search,
-            query.UndocumentedOnly);
+            query.UndocumentedOnly,
+            query.TableName);
 
         return rows.Select(r => new ColumnGridRow(
             r.ColumnId,
@@ -169,6 +170,11 @@ public class MetadataService(
         var (total, documented) = await projectionRepo.GetCoverageCountsAsync(workspaceId);
         var percent = total == 0 ? 0.0 : Math.Round((double)documented / total * 100, 1);
         return new CoverageResponse(total, documented, percent);
+    }
+
+    public async Task<List<string>> GetTableNamesAsync(Guid workspaceId)
+    {
+        return await projectionRepo.GetDistinctTableNamesAsync(workspaceId);
     }
 
     private sealed record CsvColumnRecord
