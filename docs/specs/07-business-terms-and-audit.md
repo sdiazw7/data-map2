@@ -1,6 +1,6 @@
 [← Index](../specs.md)
 
-## 17. Business Terms
+## 1. Business Terms
 
 **Endpoints:**
 ```
@@ -24,7 +24,7 @@ POST /business-terms/map
 
 Column-term relationships use `term_column_mapping`. Columns may belong to multiple terms.
 
-## 18. Metadata Audit Log
+## 2. Metadata Audit Log
 
 All metadata edits must write to `metadata_changes`.
 
@@ -35,7 +35,7 @@ PATCH /metadata/columns
 
 Only fields that actually changed get an audit record — each update diffs `description`, `example_value`, and `owner` individually against the current row, and writes one `metadata_changes` entry per changed field (not one per request or one per column).
 
-## 19. Documentation Coverage
+## 3. Documentation Coverage
 
 **Endpoint:** `GET /metadata/coverage`
 

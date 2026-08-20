@@ -1,6 +1,6 @@
 [← Index](../specs.md)
 
-## 9. Database Schema
+## 1. Database Schema
 
 **workspaces**
 - id
@@ -17,7 +17,7 @@
 - expires_at
 - max_uses
 - used_count
-- template_workspace_id — nullable; presence makes this a template invite (see [§7](03-auth-and-invites.md#7-participant-upsert-and-invite-usage-rules))
+- template_workspace_id — nullable; presence makes this a template invite (see [§3, Auth & Invites](03-auth-and-invites.md#3-participant-upsert-and-invite-usage-rules))
 
 **participants**
 - id
@@ -93,7 +93,7 @@ Column `version` is used for optimistic concurrency control. `PATCH` requests mu
 - participant_id
 - edited_at
 
-## 10. Projection Table (Read Model)
+## 2. Projection Table (Read Model)
 
 **Table name:** `column_catalog_editor`
 

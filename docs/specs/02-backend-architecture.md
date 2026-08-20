@@ -1,6 +1,6 @@
 [← Index](../specs.md)
 
-## 4. Backend Architecture
+## 1. Backend Architecture
 
 **Request Flow**
 

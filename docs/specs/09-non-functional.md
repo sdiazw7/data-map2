@@ -1,19 +1,10 @@
 [← Index](../specs.md)
 
-## 21. Performance Requirements
+## 1. Performance Requirements
 
-System must support 100k+ columns.
+System must support 100k+ columns. This drives several design decisions specced elsewhere — the projection table ([§2, Data Model](04-data-model.md#2-projection-table-read-model)), pagination and row virtualization ([§2–3, Metadata Grid](05-metadata-grid.md#2-pagination-contract)), and optimistic updates with row versioning ([§4, Metadata Grid](05-metadata-grid.md#4-bulk-metadata-updates)) — rather than being a separate list of mechanisms to keep in sync here.
 
-**Required optimizations:**
-- Projection table reads
-- Pagination (`LIMIT 200`)
-- Indexed filters
-- Batched updates
-- Optimistic UI updates
-- Row versioning
-- Frontend row virtualization (`@tanstack/react-virtual`)
-
-## 23. Non-Goals (MVP)
+## 2. Non-Goals (MVP)
 
 Do NOT implement:
 

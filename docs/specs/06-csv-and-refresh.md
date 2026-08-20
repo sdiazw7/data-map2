@@ -1,6 +1,6 @@
 [← Index](../specs.md)
 
-## 13. CSV Metadata Upload
+## 1. CSV Metadata Upload
 
 **Endpoint:** `POST /metadata/upload` (`multipart/form-data`, file field named `file`)
 
@@ -25,7 +25,7 @@ Upload CSV
 
 Upserts are workspace-scoped and keyed by name — a schema, table, or column with the same name in the same scope is reused rather than duplicated.
 
-## 14. Projection Refresh Strategy
+## 2. Projection Refresh Strategy
 
 When metadata changes occur:
 

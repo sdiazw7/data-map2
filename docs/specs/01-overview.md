@@ -19,7 +19,7 @@ MVP constraints:
 
 - No authentication providers
 - No external database connectors
-- Access via invite links only (dev-only convenience login is the sole exception — see [§6a](03-auth-and-invites.md#6a-dev-access-development-only))
+- Access via invite links only (dev-only convenience login is the sole exception — see [§2a, Auth & Invites](03-auth-and-invites.md#2a-dev-access-development-only))
 
 ## 2. Technology Stack
 
@@ -37,6 +37,8 @@ MVP constraints:
 
 **Database**
 - PostgreSQL
+
+Exact versions are pinned in `frontend/package.json` and `DataMap.Api/DataMap.Api.csproj` — not duplicated here to avoid the spec drifting out of sync as dependencies are upgraded.
 
 ## 3. Architecture Principles
 

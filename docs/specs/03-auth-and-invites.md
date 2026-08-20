@@ -1,6 +1,6 @@
 [← Index](../specs.md)
 
-## 5. Session Authentication
+## 1. Session Authentication
 
 All protected API requests require a valid session cookie.
 
@@ -18,7 +18,7 @@ Each authenticated request must update `participant_sessions.last_seen_at`. If `
 
 **Client-side session state:** on a successful join, the frontend also stores the `JoinResponse` (`participantId`, `workspaceId`, `workspaceName`, `email`) in `localStorage` under the key `datamap_session` via `useSession`, and sends `credentials: 'include'` on every request. The cookie remains the source of truth for authorization — `localStorage` only lets the UI know who is "logged in" without re-fetching.
 
-## 6. Invite Access Flow
+## 2. Invite Access Flow
 
 **Invite URL:** `/invite/{token}`
 
@@ -26,12 +26,12 @@ Each authenticated request must update `participant_sessions.last_seen_at`. If `
 User opens invite
   → Invite validated
   → Email collected
-  → Participant upserted (see [§7](#7-participant-upsert-and-invite-usage-rules) — behavior differs for template invites)
+  → Participant upserted (see [§3](#3-participant-upsert-and-invite-usage-rules) — behavior differs for template invites)
   → Session cookie issued
   → Workspace opened
 ```
 
-## 6a. Dev Access (Development Only)
+## 2a. Dev Access (Development Only)
 
 When `ASPNETCORE_ENVIRONMENT=Development`, two additional endpoints are mapped (`DevEndpoints`, only registered when `app.Environment.IsDevelopment()`) that skip the invite flow entirely:
 
@@ -46,13 +46,13 @@ This exists purely for local development convenience and must never be reachable
 
 **Frontend:** `AppHeader` renders a "Switch workspace" link back to `/` only when `import.meta.env.DEV` is true.
 
-## 7. Participant Upsert and Invite Usage Rules
+## 3. Participant Upsert and Invite Usage Rules
 
 **Endpoint:** `POST /invite/{token}/join`
 
 Participants are unique by `(workspace_id, email)`.
 
-An invite is either **shared** or **template**, based on whether `invites.template_workspace_id` is set (see [§6b](#6b-invite-creation) for how these are created).
+An invite is either **shared** or **template**, based on whether `invites.template_workspace_id` is set (see [§2b](#2b-invite-creation) for how these are created).
 
 ### Shared invite (`template_workspace_id` is null)
 
@@ -74,7 +74,7 @@ Every participant gets their **own private copy** of the template workspace inst
 
 This ensures returning users keep their history while invite usage limits still function correctly, and — for template invites — that each participant edits their own copy without stepping on anyone else's data.
 
-## 6b. Invite Creation
+## 2b. Invite Creation
 
 **Endpoint:** `POST /invites` (protected — requires an active session; the workspace is taken from the caller's session, not the request body)
 
@@ -91,7 +91,7 @@ This ensures returning users keep their history while invite usage limits still 
 |---|---|---|
 | `maxUses` | Yes | How many times the link can be used (minimum 1). |
 | `expiresAt` | Yes | UTC datetime after which the link is no longer valid. Must be in the future. |
-| `templateWorkspaceId` | No | If set, each new user gets their own copy of this workspace (see [§7](#7-participant-upsert-and-invite-usage-rules)) instead of joining a shared one. The referenced workspace must exist and have `is_template = true`, or the request fails with `404` (`TemplateWorkspaceNotFoundException`). |
+| `templateWorkspaceId` | No | If set, each new user gets their own copy of this workspace (see [§3](#3-participant-upsert-and-invite-usage-rules)) instead of joining a shared one. The referenced workspace must exist and have `is_template = true`, or the request fails with `404` (`TemplateWorkspaceNotFoundException`). |
 
 **Response (`201 Created`):**
 ```json
@@ -107,7 +107,7 @@ This ensures returning users keep their history while invite usage limits still 
 
 `token` is a 32-byte cryptographically random value, base64url-encoded. Share it as `/invite/{token}`.
 
-## 8. Invite Validation Rules
+## 4. Invite Validation Rules
 
 Invite invalid if:
 ```
