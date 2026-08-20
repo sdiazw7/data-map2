@@ -19,6 +19,11 @@ export type JoinResponse = {
   email: string
 }
 
+export type WorkspaceSummary = {
+  id: string
+  name: string
+}
+
 export type ColumnGridRow = {
   columnId: string
   schemaName: string

@@ -15,3 +15,21 @@ No logins, no auth providers — just an invite link to get in.
 - **Frontend:** React 19, TypeScript, Vite, Tailwind CSS, TanStack Table
 - **Backend:** ASP.NET Core, Minimal APIs
 - **Database:** PostgreSQL
+
+## Running locally
+
+Requires a local PostgreSQL instance, with the connection string set in `DataMap.Api/appsettings.Local.json` (gitignored).
+
+**Backend** (from repo root):
+```
+dotnet run --project DataMap.Api
+```
+Seeds a demo workspace ("Acme Commerce Analytics") on startup.
+
+**Frontend** (from `frontend/`):
+```
+npm run dev
+```
+Runs on `http://localhost:5173`.
+
+With both running, open `http://localhost:5173/`. In dev builds, the root page is a workspace picker that skips the invite flow — pick "Acme Commerce Analytics" to jump straight in. In production, `/` requires an invite link as usual.

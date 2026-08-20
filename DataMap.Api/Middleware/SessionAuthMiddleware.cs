@@ -5,11 +5,13 @@ namespace DataMap.Api.Middleware;
 
 public class SessionAuthMiddleware(RequestDelegate next)
 {
-    public async Task InvokeAsync(HttpContext context, ISessionRepository sessionRepo)
+    public async Task InvokeAsync(HttpContext context, ISessionRepository sessionRepo, IWebHostEnvironment env)
     {
-        // Skip auth for public paths
+        // Skip auth for public paths. /dev is only ever mapped in Development (see Program.cs),
+        // but the environment check here means the bypass is inert even if that ever changes.
         if (context.Request.Path.StartsWithSegments("/health") ||
-            context.Request.Path.StartsWithSegments("/invite"))
+            context.Request.Path.StartsWithSegments("/invite") ||
+            (env.IsDevelopment() && context.Request.Path.StartsWithSegments("/dev")))
         {
             await next(context);
             return;

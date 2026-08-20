@@ -37,6 +37,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IMetadataChangeRepository, MetadataChangeRepository>();
 
         services.AddScoped<IInviteService, InviteService>();
+        services.AddScoped<IDevAccessService, DevAccessService>();
         services.AddScoped<IWorkspaceCopyService, WorkspaceCopyService>();
         services.AddScoped<IMetadataService, MetadataService>();
         services.AddScoped<IBusinessTermService, BusinessTermService>();

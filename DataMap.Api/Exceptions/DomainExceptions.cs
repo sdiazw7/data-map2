@@ -11,3 +11,5 @@ public class VersionConflictException() : Exception("The column was modified by 
 public class ValidationException(string message) : Exception(message);
 
 public class TemplateWorkspaceNotFoundException() : Exception("Template workspace not found.");
+
+public class WorkspaceNotFoundException() : Exception("Workspace not found.");

@@ -25,4 +25,9 @@ public class WorkspaceRepository(AppDbContext db) : IWorkspaceRepository
                 && db.Participants.Any(p => p.WorkspaceId == w.Id && p.Email == email))
             .FirstOrDefaultAsync();
     }
+
+    public async Task<List<Workspace>> GetAllAsync()
+    {
+        return await db.Workspaces.OrderBy(w => w.Name).ToListAsync();
+    }
 }

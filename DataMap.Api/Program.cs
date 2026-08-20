@@ -26,6 +26,9 @@ InviteEndpoints.Map(app);
 MetadataEndpoints.Map(app);
 BusinessTermEndpoints.Map(app);
 
+if (app.Environment.IsDevelopment())
+    DevEndpoints.Map(app);
+
 app.Run();
 
 public partial class Program { }

@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import InvitePage from './components/pages/InvitePage'
 import WorkspacePage from './components/pages/WorkspacePage'
+import WorkspacePickerPage from './components/pages/WorkspacePickerPage'
 import CsvUploadGuidePage from './components/pages/CsvUploadGuidePage'
 import AppHeader from './components/ui/AppHeader'
 
@@ -10,7 +11,10 @@ export default function App() {
       <div className="flex flex-col min-h-screen">
         <AppHeader />
         <Routes>
-          <Route path="/" element={<Navigate to="/workspace" replace />} />
+          <Route
+            path="/"
+            element={import.meta.env.DEV ? <WorkspacePickerPage /> : <Navigate to="/workspace" replace />}
+          />
           <Route path="/invite/:token" element={<InvitePage />} />
           <Route path="/workspace" element={<WorkspacePage />} />
           <Route path="/csv-guide" element={<CsvUploadGuidePage />} />
