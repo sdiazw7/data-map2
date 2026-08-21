@@ -139,4 +139,11 @@ public class ColumnRepository(AppDbContext db) : IColumnRepository
             .Where(c => c.WorkspaceId == workspaceId)
             .ToListAsync();
     }
+
+    public async Task SetBusinessTermAsync(Guid workspaceId, Guid columnId, Guid? businessTermId)
+    {
+        await db.Columns
+            .Where(c => c.WorkspaceId == workspaceId && c.Id == columnId)
+            .ExecuteUpdateAsync(s => s.SetProperty(c => c.BusinessTermId, businessTermId));
+    }
 }

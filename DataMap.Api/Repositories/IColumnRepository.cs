@@ -27,4 +27,10 @@ public interface IColumnRepository
     Task<bool> UpdateRangeAsync(IReadOnlyCollection<Column> columns);
 
     Task<List<Column>> GetAllByWorkspaceAsync(Guid workspaceId);
+
+    /// <summary>
+    /// Sets the column's business term directly, bypassing the Version concurrency check —
+    /// term mapping is a separate action from a grid edit and was never gated by it.
+    /// </summary>
+    Task SetBusinessTermAsync(Guid workspaceId, Guid columnId, Guid? businessTermId);
 }

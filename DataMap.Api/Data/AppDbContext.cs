@@ -14,7 +14,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Column> Columns => Set<Column>();
     public DbSet<Relationship> Relationships => Set<Relationship>();
     public DbSet<BusinessTerm> BusinessTerms => Set<BusinessTerm>();
-    public DbSet<TermColumnMapping> TermColumnMappings => Set<TermColumnMapping>();
     public DbSet<MetadataChange> MetadataChanges => Set<MetadataChange>();
     public DbSet<ColumnCatalogEditor> ColumnCatalogEditor => Set<ColumnCatalogEditor>();
 
@@ -53,13 +52,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
         modelBuilder.Entity<BusinessTerm>()
             .HasIndex(b => new { b.WorkspaceId, b.Name })
-            .IsUnique();
-
-        // A column carries at most one business term. The projection has a single
-        // BusinessTerm field, so a second mapping would fan the rebuild join out into
-        // two rows sharing one ColumnId — which is the projection's primary key.
-        modelBuilder.Entity<TermColumnMapping>()
-            .HasIndex(m => m.ColumnId)
             .IsUnique();
 
         // Performance indexes not auto-created by EF

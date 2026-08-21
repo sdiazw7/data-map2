@@ -31,22 +31,4 @@ public class BusinessTermRepository(AppDbContext db) : IBusinessTermRepository
         await db.SaveChangesAsync();
         return term;
     }
-
-    public async Task<TermColumnMapping> MapTermToColumnAsync(TermColumnMapping mapping)
-    {
-        db.TermColumnMappings.Add(mapping);
-        await db.SaveChangesAsync();
-        return mapping;
-    }
-
-    public async Task<TermColumnMapping?> GetMappingByColumnAsync(Guid columnId)
-    {
-        return await db.TermColumnMappings.FirstOrDefaultAsync(m => m.ColumnId == columnId);
-    }
-
-    public async Task UpdateMappingAsync(TermColumnMapping mapping)
-    {
-        db.TermColumnMappings.Update(mapping);
-        await db.SaveChangesAsync();
-    }
 }

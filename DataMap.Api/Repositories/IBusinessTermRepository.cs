@@ -8,7 +8,4 @@ public interface IBusinessTermRepository
     Task<BusinessTerm?> GetByIdAsync(Guid termId);
     Task<BusinessTerm?> GetByNameAsync(Guid workspaceId, string name);
     Task<BusinessTerm> CreateAsync(BusinessTerm term);
-    Task<TermColumnMapping> MapTermToColumnAsync(TermColumnMapping mapping);
-    Task<TermColumnMapping?> GetMappingByColumnAsync(Guid columnId);
-    Task UpdateMappingAsync(TermColumnMapping mapping);
 }

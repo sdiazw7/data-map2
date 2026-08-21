@@ -63,24 +63,10 @@ public class BusinessTermService(
 
         await unitOfWork.ExecuteAsync(async () =>
         {
-            // A column holds at most one term, so remapping replaces the existing mapping.
-            var existing = await termRepo.GetMappingByColumnAsync(request.ColumnId);
-            if (existing is not null)
-            {
-                existing.TermId = request.TermId;
-                await termRepo.UpdateMappingAsync(existing);
-            }
-            else
-            {
-                await termRepo.MapTermToColumnAsync(new TermColumnMapping
-                {
-                    Id = Guid.NewGuid(),
-                    TermId = request.TermId,
-                    ColumnId = request.ColumnId
-                });
-            }
+            // A column holds at most one term, so this always replaces whatever was mapped before.
+            await columnRepo.SetBusinessTermAsync(workspaceId, request.ColumnId, request.TermId);
 
-            // The mapping and the projection row it feeds must land together, or the grid shows
+            // The column and the projection row it feeds must land together, or the grid shows
             // a term the catalog does not have (or misses one it does).
             await projectionService.SyncColumnTermAsync(workspaceId, request.ColumnId, term.Name);
         });

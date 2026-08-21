@@ -121,8 +121,7 @@ public class ProjectionRepository(AppDbContext db) : IProjectionRepository
             FROM app.""Columns"" col
             JOIN app.""Tables"" t ON t.""Id"" = col.""TableId""
             JOIN app.""Schemas"" s ON s.""Id"" = t.""SchemaId""
-            LEFT JOIN app.""TermColumnMappings"" tcm ON tcm.""ColumnId"" = col.""Id""
-            LEFT JOIN app.""BusinessTerms"" bt ON bt.""Id"" = tcm.""TermId""
+            LEFT JOIN app.""BusinessTerms"" bt ON bt.""Id"" = col.""BusinessTermId""
             WHERE col.""WorkspaceId"" = {0}",
             workspaceId);
     }
