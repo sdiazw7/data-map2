@@ -60,9 +60,11 @@ describe('useMetadataColumns.editColumn', () => {
     expect(result.current.columns[0].version).toBe(1)
 
     // The request carries the version the server last confirmed.
-    expect(vi.mocked(bulkUpdateColumns)).toHaveBeenCalledWith([
-      { columnId: 'c1', description: 'Updated', exampleValue: '12.50', owner: 'ana', version: 1 },
-    ])
+    await waitFor(() =>
+      expect(vi.mocked(bulkUpdateColumns)).toHaveBeenCalledWith([
+        { columnId: 'c1', description: 'Updated', exampleValue: '12.50', owner: 'ana', version: 1 },
+      ]),
+    )
 
     await act(async () => {
       write.resolve({ columns: [{ columnId: 'c1', version: 2 }] })

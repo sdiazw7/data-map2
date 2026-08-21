@@ -7,11 +7,36 @@ import { ApiError, ApiErrorCode } from '../utils/api'
 /** The editable fields of a row. A cell sends only the one it changed. */
 export type ColumnEdit = Partial<Pick<ColumnGridRow, 'description' | 'exampleValue' | 'owner'>>
 
+const EDITABLE_FIELDS = ['description', 'exampleValue', 'owner'] as const
+
+type EditableField = (typeof EDITABLE_FIELDS)[number]
+
+function touchedFields(edit: ColumnEdit): EditableField[] {
+  return EDITABLE_FIELDS.filter(field => field in edit)
+}
+
 /**
  * Rows per request. A workspace holds 100k+ columns, so the grid holds a window over them and
  * extends it as the user scrolls; the server caps a page at 1,000 either way.
  */
 export const PAGE_SIZE = 200
+
+/**
+ * One row's queued write. Edits merge into it until it is sent, so a run of keystrokes across
+ * a row costs one request rather than one per field.
+ */
+type PendingWrite = {
+  /**
+   * The values to restore if the write fails, per field this cycle touched. Recorded the first
+   * time a field is touched, so it holds what the server last confirmed rather than a value an
+   * earlier edit in the same cycle put on screen.
+   */
+  before: ColumnEdit
+  /** The row as last seen, used if it has left the window by the time the write is sent. */
+  snapshot: ColumnGridRow
+  /** One per editColumn call merged into this write; all settle together. */
+  resolvers: { resolve: () => void; reject: (err: unknown) => void }[]
+}
 
 type UseMetadataColumnsResult = {
   /** The rows loaded so far, from the first through the furthest the user has scrolled. */
@@ -62,6 +87,14 @@ export function useMetadataColumns(query: ColumnsQuery): UseMetadataColumnsResul
   // the current filters from here rather than closing over them.
   const queryRef = useRef(query)
   queryRef.current = query
+
+  // The write queue. Edits land in `pending` and leave in batches; `inFlight` holds the batch
+  // being written, whose values the server has not confirmed and so cannot be rolled back onto.
+  const pendingRef = useRef(new Map<string, PendingWrite>())
+  const inFlightRef = useRef(new Map<string, PendingWrite>())
+  const isFlushingRef = useRef(false)
+  const flushScheduledRef = useRef(false)
+  const flushRef = useRef<() => void>(() => {})
 
   const setRows = useCallback(
     (next: ColumnGridRow[] | ((prev: ColumnGridRow[]) => ColumnGridRow[])) => {
@@ -117,83 +150,159 @@ export function useMetadataColumns(query: ColumnsQuery): UseMetadataColumnsResul
   }, [setRows, setTotalCount])
 
   /**
-   * Reloads the page a row sits on. Used after a version conflict: the whole window could be
-   * discarded instead, but that would drop a user who is 5,000 rows deep back at the top.
+   * Reloads the pages the given rows sit on. Used after a version conflict: the whole window
+   * could be discarded instead, but that would drop a user who is 5,000 rows deep back at the
+   * top. A batch can span pages, and several of its rows usually share one, so the pages are
+   * collapsed to a set before any of them is fetched.
    */
-  const refreshRowPage = useCallback(
-    async (columnId: string) => {
-      const index = rowsRef.current.findIndex(row => row.columnId === columnId)
-      if (index < 0) return
+  const refreshPagesFor = useCallback(
+    async (columnIds: string[]) => {
+      const offsets = new Set<number>()
+      for (const columnId of columnIds) {
+        const index = rowsRef.current.findIndex(row => row.columnId === columnId)
+        if (index < 0) continue
+        offsets.add(Math.floor(index / PAGE_SIZE) * PAGE_SIZE)
+      }
 
-      const offset = Math.floor(index / PAGE_SIZE) * PAGE_SIZE
       const generation = generationRef.current
 
-      try {
-        const page = await getColumns({ ...queryRef.current, limit: PAGE_SIZE, offset })
-        if (generation !== generationRef.current) return
+      for (const offset of offsets) {
+        try {
+          const page = await getColumns({ ...queryRef.current, limit: PAGE_SIZE, offset })
+          if (generation !== generationRef.current) return
 
-        setRows(rows => {
-          const next = [...rows]
-          page.items.forEach((row, i) => {
-            if (offset + i < next.length) next[offset + i] = row
+          setRows(rows => {
+            const next = [...rows]
+            page.items.forEach((row, i) => {
+              if (offset + i < next.length) next[offset + i] = row
+            })
+            return next
           })
-          return next
-        })
-        setTotalCount(page.total)
-      } catch {
-        // Best effort. The edit has already been rolled back and reported, and leaving the row
-        // stale does not make that worse.
+          setTotalCount(page.total)
+        } catch {
+          // Best effort. The edit has already been rolled back and reported, and leaving the
+          // row stale does not make that worse.
+        }
       }
     },
     [setRows, setTotalCount],
   )
 
-  const editColumn = useCallback(
-    async (columnId: string, edit: ColumnEdit) => {
-      const before = rowsRef.current.find(row => row.columnId === columnId)
-      if (!before) return
+  const scheduleFlush = useCallback(() => {
+    if (flushScheduledRef.current || isFlushingRef.current) return
+    flushScheduledRef.current = true
 
-      // Optimistic: the cell shows the new value now. Everything below either confirms it or
-      // takes it back.
-      patchRow(columnId, edit)
+    // A microtask rather than a timer: every edit made in this tick — a run of keystrokes, a
+    // pasted range — batches into one request, and a lone edit still leaves immediately.
+    queueMicrotask(() => flushRef.current())
+  }, [])
 
-      // The version travels with the request as the concurrency token. It comes from the row
-      // as last confirmed by the server, never from what the grid is currently showing.
-      const after = { ...before, ...edit }
-      const request: ColumnUpdateRequest = {
+  const flush = useCallback(async () => {
+    flushScheduledRef.current = false
+    if (isFlushingRef.current || pendingRef.current.size === 0) return
+
+    const batch = [...pendingRef.current.entries()]
+    pendingRef.current.clear()
+    inFlightRef.current = new Map(batch)
+    isFlushingRef.current = true
+
+    // The version is read here and not when the edit was made. An edit typed while an earlier
+    // write for the same row was still in flight would otherwise carry the version that write
+    // was about to spend, and the server would reject the user's own keystrokes as a conflict.
+    const requests: ColumnUpdateRequest[] = batch.map(([columnId, write]) => {
+      const row = rowsRef.current.find(r => r.columnId === columnId) ?? write.snapshot
+      return {
         columnId,
-        description: after.description,
-        exampleValue: after.exampleValue,
-        owner: after.owner,
-        version: before.version,
+        description: row.description,
+        exampleValue: row.exampleValue,
+        owner: row.owner,
+        version: row.version,
+      }
+    })
+
+    try {
+      const result = await bulkUpdateColumns(requests)
+
+      // The response carries each new version, so the rows are reconciled in place. Without it
+      // they would keep the versions they just spent and every later edit would conflict.
+      const versions = new Map(result.columns.map(c => [c.columnId, c.version]))
+      for (const [columnId] of batch) {
+        const version = versions.get(columnId)
+        if (version !== undefined) patchRow(columnId, { version })
       }
 
-      try {
-        const result = await bulkUpdateColumns([request])
-
-        // The response carries the new version, so the row is reconciled in place. Without it
-        // the row would keep the version it just spent and every later edit would conflict.
-        const version = result.columns.find(c => c.columnId === columnId)?.version
-        if (version !== undefined) patchRow(columnId, { version })
-      } catch (err: unknown) {
-        // Undo only the fields this edit touched, so a term mapping that landed on the same
-        // row in the meantime survives the rollback.
+      for (const [, write] of batch) write.resolvers.forEach(r => r.resolve())
+    } catch (err: unknown) {
+      // Undo only the fields these edits touched, so a term mapping that landed on one of the
+      // rows in the meantime survives the rollback.
+      for (const [columnId, write] of batch) {
+        const queued = pendingRef.current.get(columnId)
         const revert: ColumnEdit = {}
-        if ('description' in edit) revert.description = before.description
-        if ('exampleValue' in edit) revert.exampleValue = before.exampleValue
-        if ('owner' in edit) revert.owner = before.owner
-        patchRow(columnId, revert)
 
-        // Someone else wrote to this row first. Rolling back restores what we last saw, which
-        // is already out of date — only a refetch gets the winning values and a usable version.
-        if (err instanceof ApiError && err.code === ApiErrorCode.VersionConflict) {
-          void refreshRowPage(columnId)
+        for (const field of touchedFields(write.before)) {
+          // A newer edit to this field is already queued. It owns what the cell shows, and it
+          // carries the same confirmed baseline, so undoing it here would throw away the
+          // keystrokes the user typed while this write was in flight.
+          if (queued && field in queued.before) continue
+          revert[field] = write.before[field]
         }
 
-        throw err
+        patchRow(columnId, revert)
       }
+
+      // Someone else wrote to a row in this batch first, and the server applied none of it.
+      // Rolling back restores what we last saw, which is already out of date — only a refetch
+      // gets the winning values and a usable version.
+      if (err instanceof ApiError && err.code === ApiErrorCode.VersionConflict) {
+        void refreshPagesFor(batch.map(([columnId]) => columnId))
+      }
+
+      for (const [, write] of batch) write.resolvers.forEach(r => r.reject(err))
+    } finally {
+      inFlightRef.current = new Map()
+      isFlushingRef.current = false
+
+      // Edits made while this batch was in flight are waiting on the version it just returned.
+      if (pendingRef.current.size > 0) scheduleFlush()
+    }
+  }, [patchRow, refreshPagesFor, scheduleFlush])
+
+  flushRef.current = () => void flush()
+
+  const editColumn = useCallback(
+    (columnId: string, edit: ColumnEdit): Promise<void> => {
+      const row = rowsRef.current.find(r => r.columnId === columnId)
+      if (!row) return Promise.resolve()
+
+      // Optimistic: the cell shows the new value now. The queue either confirms it or takes it
+      // back.
+      patchRow(columnId, edit)
+
+      const queued = pendingRef.current.get(columnId)
+      const write: PendingWrite = queued ?? { before: {}, snapshot: row, resolvers: [] }
+
+      for (const field of touchedFields(edit)) {
+        if (field in write.before) continue
+
+        // What to restore is the last value the server confirmed. While a write for this row is
+        // in flight the row on screen holds values it has not confirmed yet, so the baseline
+        // comes from that write instead — otherwise a second failure would restore a value the
+        // first one had already rolled back.
+        const inFlight = inFlightRef.current.get(columnId)
+        write.before[field] =
+          inFlight && field in inFlight.before ? inFlight.before[field] : row[field]
+      }
+
+      write.snapshot = { ...row, ...edit }
+
+      if (!queued) pendingRef.current.set(columnId, write)
+      scheduleFlush()
+
+      return new Promise<void>((resolve, reject) => {
+        write.resolvers.push({ resolve, reject })
+      })
     },
-    [patchRow, refreshRowPage],
+    [patchRow, scheduleFlush],
   )
 
   const applyTerm = useCallback(
