@@ -49,6 +49,7 @@ export default function WorkspacePage() {
 
   async function handleUpdate(update: ColumnUpdateRequest) {
     await mutate([update])
+    reloadColumns()
     reloadCoverage()
   }
 
