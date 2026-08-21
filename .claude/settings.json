@@ -1,11 +1,77 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
+    "defaultMode": "acceptEdits",
+    "disableBypassPermissionsMode": "disable",
+
     "allow": [
-      "Bash(dotnet build DataMap.Api/DataMap.Api.csproj)",
-      "Bash(npx vite build)",
-      "Bash(npx tsc *)",
-      "Bash(taskkill //PID 11440 //T //F)",
+      "Bash(dotnet build *)",
+      "Bash(dotnet test *)",
+      "Bash(dotnet list package *)",
+      "Bash(dotnet sln *)",
+      "Bash(dotnet --info)",
+      "Bash(dotnet --version)",
+      "Bash(msbuild *.sln)",
+      "Bash(msbuild *.csproj)",
+      "Bash(msbuild /t:Build *)",
+      "Bash(msbuild /t:Rebuild *)",
+
+      "Bash(npm run build)",
+      "Bash(npm run test *)",
+      "Bash(npm test *)",
+      "Bash(npm run lint *)",
+
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+
       "Bash(netstat -ano)"
+    ],
+
+    "ask": [
+      "Bash(dotnet format *)",
+      "Bash(dotnet restore *)",
+      "Bash(dotnet new *)",
+      "Bash(dotnet nuget push *)",
+      "Bash(dotnet tool install *)",
+      "Bash(dotnet ef database update *)",
+      "Bash(nuget locals *)",
+
+      "Bash(npm install *)",
+      "Bash(npm ci)",
+      "Bash(npm publish *)",
+
+      "Bash(git commit *)",
+      "Bash(git stash *)",
+      "Bash(git checkout *)",
+      "Bash(git restore *)",
+      "Bash(git reset --hard *)",
+      "Bash(git clean *)",
+      "Bash(git push *)",
+
+      "Bash(rm *)",
+      "Bash(curl *)",
+      "Bash(wget *)",
+
+      "PowerShell(Remove-Item *)",
+      "PowerShell(Invoke-RestMethod *)",
+      "PowerShell(Invoke-WebRequest *)"
+    ],
+
+    "deny": [
+      "Bash(git push *--force*)",
+      "Bash(git push -f)",
+      "Bash(git push -f *)",
+      "Bash(git push * -f)",
+      "Bash(git push * -f *)",
+
+      "Read(**/.env)",
+      "Read(**/appsettings.Production.json)",
+      "Read(**/secrets.json)",
+      "Read(**/*.pfx)",
+      "Read(**/*.publishsettings)",
+      "Read(**/*.pubxml.user)"
     ]
   }
 }
