@@ -62,10 +62,10 @@ public class ErrorHandlerMiddlewareTests
     }
 
     [Fact]
-    public async Task InvokeAsync_InviteUsageExceededException_Returns409WithCode()
+    public async Task InvokeAsync_InviteUsageExceededException_Returns410WithCode()
     {
         var (status, body) = await InvokeAsync(new InviteUsageExceededException());
-        Assert.Equal(409, status);
+        Assert.Equal(410, status);
         Assert.Equal("INVITE_USAGE_EXCEEDED", GetErrorCode(body));
     }
 

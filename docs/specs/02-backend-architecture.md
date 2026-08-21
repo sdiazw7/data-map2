@@ -18,4 +18,9 @@ leaves the write half-applied — `IUnitOfWork.ExecuteAsync` wraps such an opera
 rolls back as a unit. It is re-entrant: a nested call joins the ambient transaction rather than
 opening a second one. Single-repository operations do not need it.
 
+Services take and return plain domain and DTO types — never `HttpContext`, `IFormFile`, or
+cookies. Anything transport-shaped is adapted at the endpoint: an upload arrives as a stream with
+its metadata, and a service that establishes a session returns the session id for the endpoint to
+turn into a cookie. This keeps a service callable, and testable, without an HTTP request behind it.
+
 `SessionAuthMiddleware` sits in front of every endpoint except `GET /health` and `GET|POST /invite/*`, and populates `HttpContext.Items["ParticipantId"]` / `["WorkspaceId"]` for downstream use.

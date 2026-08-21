@@ -13,10 +13,11 @@ public static class DevEndpoints
             return Results.Ok(result);
         });
 
-        app.MapPost("/dev/workspaces/{id}/join", async (Guid id, IDevAccessService svc) =>
+        app.MapPost("/dev/workspaces/{id}/join", async (Guid id, IDevAccessService svc, HttpContext ctx) =>
         {
             var result = await svc.JoinAsync(id);
-            return Results.Ok(result);
+            SessionCookie.Issue(ctx, result.SessionId);
+            return Results.Ok(result.Response);
         });
     }
 }

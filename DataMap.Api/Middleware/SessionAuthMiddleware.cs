@@ -17,7 +17,7 @@ public class SessionAuthMiddleware(RequestDelegate next)
             return;
         }
 
-        if (!context.Request.Cookies.TryGetValue("participant_session", out var cookieValue)
+        if (!context.Request.Cookies.TryGetValue(Endpoints.SessionCookie.Name, out var cookieValue)
             || string.IsNullOrWhiteSpace(cookieValue))
         {
             await WriteUnauthorizedAsync(context, "UNAUTHORIZED", "Authentication required.");

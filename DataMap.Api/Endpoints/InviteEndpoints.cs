@@ -13,10 +13,11 @@ public static class InviteEndpoints
             return Results.Ok(result);
         });
 
-        app.MapPost("/invite/{token}/join", async (string token, JoinRequest req, IInviteService svc) =>
+        app.MapPost("/invite/{token}/join", async (string token, JoinRequest req, IInviteService svc, HttpContext ctx) =>
         {
             var result = await svc.JoinAsync(token, req);
-            return Results.Ok(result);
+            SessionCookie.Issue(ctx, result.SessionId);
+            return Results.Ok(result.Response);
         });
 
         app.MapPost("/invites", async (CreateInviteRequest req, IInviteService svc, HttpContext ctx) =>

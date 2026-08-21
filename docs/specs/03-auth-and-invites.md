@@ -99,9 +99,22 @@ pointing at it — and the user would be handed a fresh copy on every retry, acc
 
 | Field | Required | Description |
 |---|---|---|
-| `maxUses` | Yes | How many times the link can be used (minimum 1). |
-| `expiresAt` | Yes | UTC datetime after which the link is no longer valid. Must be in the future. |
-| `templateWorkspaceId` | No | If set, each new user gets their own copy of this workspace (see [§3](#3-participant-upsert-and-invite-usage-rules)) instead of joining a shared one. The referenced workspace must exist and have `is_template = true`, or the request fails with `404` (`TemplateWorkspaceNotFoundException`). |
+| `maxUses` | Yes | How many times the link can be used. Between 1 and 1000. |
+| `expiresAt` | Yes | UTC datetime after which the link is no longer valid. Must be in the future, and no more than 365 days out. |
+| `templateWorkspaceId` | No | If set, each new user gets their own copy of this workspace (see [§3](#3-participant-upsert-and-invite-usage-rules)) instead of joining a shared one. Subject to the authorization rule below. |
+
+`maxUses` and `expiresAt` are bounded rather than left open because an invite link is the only
+access control in the product ([§2, Non-Functional](09-non-functional.md#2-non-goals-mvp) rules out
+RBAC). An invite with an unbounded use count and a distant expiry is a permanent open door.
+
+**Template authorization.** A caller may only build a template invite around a template they are
+actually working in — the template workspace itself, or a workspace copied from it
+(`source_template_id` matches). Any other target fails with `404`
+(`TemplateWorkspaceNotFoundException`), as does a target that does not exist or is not flagged
+`is_template`.
+
+All three cases return the same `404` deliberately: a distinct "forbidden" response would let a
+caller probe workspace ids and learn which ones are real templates.
 
 **Response (`201 Created`):**
 ```json
@@ -126,8 +139,24 @@ OR
 used_count >= max_uses
 ```
 
+Both conditions mean the same thing to the person holding the link — it is dead and no action of
+theirs revives it — so both return the same status. They stay distinguishable through `error.code`,
+which is what the UI branches on to choose its wording.
+
 **Errors**
-- `404` → invite not found
-- `410` → invite expired
-- `429` → invite usage exceeded
-- `404` → template workspace not found / not a template (invite creation only)
+
+| Status | `error.code` | Case |
+|---|---|---|
+| `404` | `INVITE_NOT_FOUND` | no invite with that token |
+| `410` | `INVITE_EXPIRED` | `expires_at < now()` |
+| `410` | `INVITE_USAGE_EXCEEDED` | `used_count >= max_uses` |
+| `404` | `TEMPLATE_WORKSPACE_NOT_FOUND` | template missing, not a template, or not one the caller may use (invite creation only — see [§2b](#2b-invite-creation)) |
+
+`410 Gone` rather than `429 Too Many Requests`: `429` describes a caller sending requests too
+quickly and invites a retry after a delay, but an exhausted invite is a permanent property of the
+invite — waiting does not help, and a different person gets the same answer. Clients and proxies
+routinely auto-retry `429`, so using it here produces retry traffic against a link that will never
+work again.
+
+`409 Conflict` is likewise reserved for conflicts the caller *can* resolve and retry — a stale
+row version, a business term name already taken. An exhausted invite is not one of those.

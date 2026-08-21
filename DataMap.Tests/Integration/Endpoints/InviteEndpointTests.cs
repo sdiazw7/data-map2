@@ -1,5 +1,6 @@
 using DataMap.Api.DTOs;
 using DataMap.Api.Exceptions;
+using DataMap.Api.Services;
 using DataMap.Tests.Integration;
 using Moq;
 using System.Net;
@@ -62,7 +63,8 @@ public class InviteEndpointTests(TestFixture fixture) : IClassFixture<TestFixtur
     public async Task JoinInvite_ValidRequest_Returns200WithJoinResponse()
     {
         var joinResponse = new JoinResponse(Guid.NewGuid(), Guid.NewGuid(), "Acme Corp", "user@example.com");
-        fixture.InviteService.Setup(s => s.JoinAsync("demo", It.IsAny<JoinRequest>())).ReturnsAsync(joinResponse);
+        fixture.InviteService.Setup(s => s.JoinAsync("demo", It.IsAny<JoinRequest>()))
+            .ReturnsAsync(new JoinResult(joinResponse, Guid.NewGuid()));
 
         var client = fixture.CreateClient();
         var response = await client.PostAsJsonAsync("/invite/demo/join", new { email = "user@example.com" });
@@ -99,7 +101,7 @@ public class InviteEndpointTests(TestFixture fixture) : IClassFixture<TestFixtur
     }
 
     [Fact]
-    public async Task JoinInvite_MaxUsesReached_Returns409()
+    public async Task JoinInvite_MaxUsesReached_Returns410()
     {
         fixture.InviteService.Setup(s => s.JoinAsync("full", It.IsAny<JoinRequest>()))
             .ThrowsAsync(new InviteUsageExceededException());
@@ -107,7 +109,7 @@ public class InviteEndpointTests(TestFixture fixture) : IClassFixture<TestFixtur
         var client = fixture.CreateClient();
         var response = await client.PostAsJsonAsync("/invite/full/join", new { email = "user@example.com" });
 
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Gone, response.StatusCode);
         AssertErrorCode(await response.Content.ReadAsStringAsync(), "INVITE_USAGE_EXCEEDED");
     }
 

@@ -13,6 +13,18 @@ sales,orders,status,varchar
 
 A CSV upload guide describing this format is served at `/csv-guide`.
 
+**Response (`200 OK`):** a summary of what the import did, so the caller can report it rather
+than guess.
+```json
+{
+  "rows": 38,
+  "schemas": 3,
+  "tables": 8,
+  "columnsCreated": 30,
+  "columnsUpdated": 8
+}
+```
+
 **Upload flow:**
 ```
 Upload CSV

@@ -8,6 +8,12 @@ Workspace seeded with demo dataset: **Acme Commerce Analytics**. This workspace 
 
 The exact tables and columns are defined in `DemoDataSeeder.cs` — not duplicated here to avoid the spec drifting out of sync as the seed data evolves.
 
+### When it runs
+
+Only when `ASPNETCORE_ENVIRONMENT=Development`. The seeder writes demo content into whatever
+database the process is pointed at, so running it unconditionally would put Acme Commerce
+Analytics into a deployed environment.
+
 ### Idempotency
 
 The seeder checks whether the workspace already exists before creating anything:

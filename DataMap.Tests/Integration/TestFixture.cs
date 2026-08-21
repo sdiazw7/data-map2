@@ -33,6 +33,7 @@ public class TestFixture : WebApplicationFactory<Program>
     public readonly Mock<IProjectionRepository> ProjectionRepo = new();
     public readonly Mock<IInviteService> InviteService = new();
     public readonly Mock<IMetadataService> MetadataService = new();
+    public readonly Mock<IMetadataImportService> MetadataImportService = new();
     public readonly Mock<IBusinessTermService> BusinessTermService = new();
 
     public TestFixture()
@@ -76,6 +77,7 @@ public class TestFixture : WebApplicationFactory<Program>
             // Replace application services with mocks
             ReplaceScoped<IInviteService>(services, _ => InviteService.Object);
             ReplaceScoped<IMetadataService>(services, _ => MetadataService.Object);
+            ReplaceScoped<IMetadataImportService>(services, _ => MetadataImportService.Object);
             ReplaceScoped<IBusinessTermService>(services, _ => BusinessTermService.Object);
         });
     }

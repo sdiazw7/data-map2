@@ -10,8 +10,11 @@ builder.Services.AddDataMapServices(builder.Configuration);
 
 var app = builder.Build();
 
-using (var scope = app.Services.CreateScope())
+// Demo data is a local-development convenience. Seeding unconditionally would write it into
+// whatever database the deployed environment is pointed at.
+if (app.Environment.IsDevelopment())
 {
+    using var scope = app.Services.CreateScope();
     var seeder = scope.ServiceProvider.GetRequiredService<DataMap.Api.Seed.DemoDataSeeder>();
     await seeder.SeedAsync();
 }

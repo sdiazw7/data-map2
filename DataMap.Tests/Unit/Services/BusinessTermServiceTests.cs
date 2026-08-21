@@ -1,3 +1,4 @@
+using DataMap.Api.Data;
 using DataMap.Api.DTOs;
 using DataMap.Api.Exceptions;
 using DataMap.Api.Models;
@@ -13,12 +14,21 @@ public class BusinessTermServiceTests
     private readonly Mock<IBusinessTermRepository> _termRepo = new();
     private readonly Mock<IColumnRepository> _columnRepo = new();
     private readonly Mock<IProjectionService> _projectionService = new();
+    private readonly Mock<IUnitOfWork> _unitOfWork = new();
     private readonly Mock<ILogger<BusinessTermService>> _logger = new();
+
+    public BusinessTermServiceTests()
+    {
+        // Run the transactional body inline; what matters is which calls happen inside it.
+        _unitOfWork.Setup(u => u.ExecuteAsync(It.IsAny<Func<Task>>()))
+            .Returns<Func<Task>>(operation => operation());
+    }
 
     private BusinessTermService CreateService() => new(
         _termRepo.Object,
         _columnRepo.Object,
         _projectionService.Object,
+        _unitOfWork.Object,
         _logger.Object);
 
     /// <summary>Makes the column resolve inside the given workspace.</summary>
@@ -135,6 +145,32 @@ public class BusinessTermServiceTests
         Assert.Equal(workspaceId, saved!.WorkspaceId);
     }
 
+    [Fact]
+    public async Task CreateAsync_DuplicateName_ThrowsBusinessTermAlreadyExists()
+    {
+        // (workspace_id, name) is uniquely indexed, so without this check a retyped term
+        // reached the database and came back as a 500.
+        var workspaceId = Guid.NewGuid();
+        _termRepo.Setup(r => r.GetByNameAsync(workspaceId, "Revenue"))
+            .ReturnsAsync(new BusinessTerm { Id = Guid.NewGuid(), WorkspaceId = workspaceId, Name = "Revenue" });
+
+        await Assert.ThrowsAsync<BusinessTermAlreadyExistsException>(() =>
+            CreateService().CreateAsync(workspaceId, new BusinessTermCreateRequest("Revenue", "def")));
+
+        _termRepo.Verify(r => r.CreateAsync(It.IsAny<BusinessTerm>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CreateAsync_DuplicateCheckUsesTheTrimmedName()
+    {
+        var workspaceId = Guid.NewGuid();
+        _termRepo.Setup(r => r.GetByNameAsync(workspaceId, "Revenue"))
+            .ReturnsAsync(new BusinessTerm { Id = Guid.NewGuid(), Name = "Revenue" });
+
+        await Assert.ThrowsAsync<BusinessTermAlreadyExistsException>(() =>
+            CreateService().CreateAsync(workspaceId, new BusinessTermCreateRequest("  Revenue  ", "def")));
+    }
+
     // ── MapToColumnAsync ─────────────────────────────────────────────────────
 
     [Fact]
@@ -178,7 +214,7 @@ public class BusinessTermServiceTests
     }
 
     [Fact]
-    public async Task MapToColumnAsync_ColumnInDifferentWorkspace_ThrowsValidationException()
+    public async Task MapToColumnAsync_ColumnInDifferentWorkspace_ThrowsColumnNotFoundException()
     {
         var workspaceId = Guid.NewGuid();
         var termId = Guid.NewGuid();
@@ -187,25 +223,25 @@ public class BusinessTermServiceTests
         _termRepo.Setup(r => r.GetByIdAsync(termId)).ReturnsAsync(new BusinessTerm { Id = termId, WorkspaceId = workspaceId });
         _columnRepo.Setup(r => r.GetByIdAsync(workspaceId, columnId)).ReturnsAsync((Column?)null);
 
-        await Assert.ThrowsAsync<ValidationException>(() =>
+        await Assert.ThrowsAsync<ColumnNotFoundException>(() =>
             CreateService().MapToColumnAsync(workspaceId, new TermMappingRequest(termId, columnId)));
 
         _termRepo.Verify(r => r.MapTermToColumnAsync(It.IsAny<TermColumnMapping>()), Times.Never);
     }
 
     [Fact]
-    public async Task MapToColumnAsync_TermNotFound_ThrowsValidationException()
+    public async Task MapToColumnAsync_TermNotFound_ThrowsBusinessTermNotFoundException()
     {
         var workspaceId = Guid.NewGuid();
         var termId = Guid.NewGuid();
         _termRepo.Setup(r => r.GetByIdAsync(termId)).ReturnsAsync((BusinessTerm?)null);
 
-        await Assert.ThrowsAsync<ValidationException>(() =>
+        await Assert.ThrowsAsync<BusinessTermNotFoundException>(() =>
             CreateService().MapToColumnAsync(workspaceId, new TermMappingRequest(termId, Guid.NewGuid())));
     }
 
     [Fact]
-    public async Task MapToColumnAsync_TermBelongsToDifferentWorkspace_ThrowsValidationException()
+    public async Task MapToColumnAsync_TermBelongsToDifferentWorkspace_ThrowsBusinessTermNotFoundException()
     {
         var workspaceId = Guid.NewGuid();
         var termId = Guid.NewGuid();
@@ -213,7 +249,7 @@ public class BusinessTermServiceTests
 
         _termRepo.Setup(r => r.GetByIdAsync(termId)).ReturnsAsync(term);
 
-        await Assert.ThrowsAsync<ValidationException>(() =>
+        await Assert.ThrowsAsync<BusinessTermNotFoundException>(() =>
             CreateService().MapToColumnAsync(workspaceId, new TermMappingRequest(termId, Guid.NewGuid())));
     }
 
@@ -244,7 +280,7 @@ public class BusinessTermServiceTests
         var termId = Guid.NewGuid();
         _termRepo.Setup(r => r.GetByIdAsync(termId)).ReturnsAsync((BusinessTerm?)null);
 
-        await Assert.ThrowsAsync<ValidationException>(() =>
+        await Assert.ThrowsAsync<BusinessTermNotFoundException>(() =>
             CreateService().MapToColumnAsync(workspaceId, new TermMappingRequest(termId, Guid.NewGuid())));
 
         _projectionService.Verify(p => p.RefreshAsync(It.IsAny<Guid>()), Times.Never);

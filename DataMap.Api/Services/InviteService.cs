@@ -14,10 +14,16 @@ public class InviteService(
     ISessionRepository sessionRepo,
     IWorkspaceRepository workspaceRepo,
     IWorkspaceCopyService workspaceCopyService,
-    IHttpContextAccessor httpContextAccessor,
     IUnitOfWork unitOfWork,
     ILogger<InviteService> logger) : BaseService(logger), IInviteService
 {
+    private const int MaxEmailLength = 320;
+
+    // An invite is the only access control in the product, so neither its reach nor its lifetime
+    // is left open — an unbounded MaxUses with a distant expiry is a permanent open door.
+    private const int MaxInviteUses = 1_000;
+    private static readonly TimeSpan MaxInviteLifetime = TimeSpan.FromDays(365);
+
     public async Task<InviteDto> GetAsync(string token)
     {
         var invite = await inviteRepo.GetByTokenAsync(token);
@@ -34,7 +40,7 @@ public class InviteService(
             isValid);
     }
 
-    public async Task<JoinResponse> JoinAsync(string token, JoinRequest request)
+    public async Task<JoinResult> JoinAsync(string token, JoinRequest request)
     {
         var invite = await inviteRepo.GetByTokenAsync(token);
         if (invite is null)
@@ -46,8 +52,7 @@ public class InviteService(
         if (invite.UsedCount >= invite.MaxUses)
             throw new InviteUsageExceededException();
 
-        if (string.IsNullOrWhiteSpace(request.Email))
-            throw new ValidationException("Email is required.");
+        var email = NormalizeEmail(request.Email);
 
         // One transaction across the whole join. A template join copies an entire workspace
         // before it creates the participant, and the copy is only ever found again by looking
@@ -56,8 +61,8 @@ public class InviteService(
         var (participant, workspaceId, session) = await unitOfWork.ExecuteAsync(async () =>
         {
             var (joined, joinedWorkspaceId) = invite.TemplateWorkspaceId is not null
-                ? await JoinTemplateInviteAsync(invite, request.Email)
-                : await JoinSharedInviteAsync(invite, request.Email);
+                ? await JoinTemplateInviteAsync(invite, email)
+                : await JoinSharedInviteAsync(invite, email);
 
             var newSession = new ParticipantSession
             {
@@ -72,41 +77,28 @@ public class InviteService(
             return (joined, joinedWorkspaceId, newSession);
         });
 
-        var httpContext = httpContextAccessor.HttpContext
-            ?? throw new InvalidOperationException("No active HTTP context.");
-
-        httpContext.Response.Cookies.Append("participant_session", session.Id.ToString(), new CookieOptions
-        {
-            HttpOnly = true,
-            SameSite = SameSiteMode.Lax,
-            Path = "/",
-            Expires = DateTimeOffset.UtcNow.AddDays(30),
-        });
-
         Logger.LogInformation("Participant {ParticipantId} joined workspace {WorkspaceId}",
             participant.Id, workspaceId);
 
-        return new JoinResponse(
-            participant.Id,
-            workspaceId,
-            invite.Workspace.Name,
-            participant.Email);
+        return new JoinResult(
+            new JoinResponse(
+                participant.Id,
+                workspaceId,
+                invite.Workspace.Name,
+                participant.Email),
+            session.Id);
     }
 
     public async Task<CreateInviteResponse> CreateAsync(CreateInviteRequest request, Guid workspaceId)
     {
-        if (request.MaxUses < 1)
-            throw new ValidationException("MaxUses must be at least 1.");
-
-        if (request.ExpiresAt <= DateTime.UtcNow)
-            throw new ValidationException("ExpiresAt must be in the future.");
+        Require(request.MaxUses >= 1, "MaxUses must be at least 1.");
+        Require(request.MaxUses <= MaxInviteUses, $"MaxUses must be at most {MaxInviteUses:N0}.");
+        Require(request.ExpiresAt > DateTime.UtcNow, "ExpiresAt must be in the future.");
+        Require(request.ExpiresAt <= DateTime.UtcNow.Add(MaxInviteLifetime),
+            $"ExpiresAt must be within {MaxInviteLifetime.TotalDays:N0} days.");
 
         if (request.TemplateWorkspaceId is not null)
-        {
-            var template = await workspaceRepo.GetByIdAsync(request.TemplateWorkspaceId.Value);
-            if (template is null || !template.IsTemplate)
-                throw new TemplateWorkspaceNotFoundException();
-        }
+            await AuthorizeTemplateAsync(request.TemplateWorkspaceId.Value, workspaceId);
 
         var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
             .Replace('+', '-').Replace('/', '_').TrimEnd('=');
@@ -133,6 +125,49 @@ public class InviteService(
             invite.ExpiresAt,
             invite.MaxUses,
             invite.TemplateWorkspaceId);
+    }
+
+    /// <summary>
+    /// A caller may only build a template invite around a template they are actually working in —
+    /// the template itself, or a copy made from it.
+    /// </summary>
+    private async Task AuthorizeTemplateAsync(Guid templateWorkspaceId, Guid callerWorkspaceId)
+    {
+        var template = await workspaceRepo.GetByIdAsync(templateWorkspaceId);
+        var caller = await workspaceRepo.GetByIdAsync(callerWorkspaceId);
+
+        var authorized = template is { IsTemplate: true }
+            && caller is not null
+            && (caller.Id == template.Id || caller.SourceTemplateId == template.Id);
+
+        if (!authorized)
+        {
+            Logger.LogWarning(
+                "Workspace {WorkspaceId} was refused a template invite for {TemplateWorkspaceId}",
+                callerWorkspaceId, templateWorkspaceId);
+
+            // Reported as not-found rather than forbidden so the response cannot be used to
+            // confirm which guessed ids happen to be real template workspaces.
+            throw new TemplateWorkspaceNotFoundException();
+        }
+    }
+
+    /// <summary>
+    /// Trims and lowercases the address. Participants are keyed by <c>(workspace_id, email)</c>
+    /// on a case-sensitive unique index, so an un-normalized address would let one person hold
+    /// two participant rows — and on a template invite, two separate private copies of the
+    /// workspace, with their work split across both.
+    /// </summary>
+    private static string NormalizeEmail(string? email)
+    {
+        var trimmed = RequireText(email, "Email", MaxEmailLength).ToLowerInvariant();
+
+        var at = trimmed.IndexOf('@');
+        Require(
+            at > 0 && at < trimmed.Length - 1 && trimmed.IndexOf('@', at + 1) < 0,
+            "Email must be a valid address.");
+
+        return trimmed;
     }
 
     private async Task<(Participant, Guid WorkspaceId)> JoinSharedInviteAsync(Invite invite, string email)

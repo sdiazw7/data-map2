@@ -1,3 +1,4 @@
+using DataMap.Api.Data;
 using DataMap.Api.DTOs;
 using DataMap.Api.Exceptions;
 using DataMap.Api.Models;
@@ -10,8 +11,12 @@ public class BusinessTermService(
     IBusinessTermRepository termRepo,
     IColumnRepository columnRepo,
     IProjectionService projectionService,
+    IUnitOfWork unitOfWork,
     ILogger<BusinessTermService> logger) : BaseService(logger), IBusinessTermService
 {
+    private const int MaxNameLength = 200;
+    private const int MaxDefinitionLength = 4_000;
+
     public async Task<List<BusinessTermDto>> GetAllAsync(Guid workspaceId)
     {
         var terms = await termRepo.GetAllAsync(workspaceId);
@@ -20,18 +25,22 @@ public class BusinessTermService(
 
     public async Task<BusinessTermDto> CreateAsync(Guid workspaceId, BusinessTermCreateRequest request)
     {
-        if (string.IsNullOrWhiteSpace(request.Name))
-            throw new ValidationException("Term name is required.");
+        var name = RequireText(request.Name, "Term name", MaxNameLength);
+        var definition = OptionalText(request.Definition, "Definition", MaxDefinitionLength) ?? string.Empty;
 
-        var term = new BusinessTerm
+        // (workspace_id, name) is uniquely indexed. Checking first turns a retyped term into a
+        // 409 the UI can explain, instead of a DbUpdateException surfacing as a 500.
+        var existing = await termRepo.GetByNameAsync(workspaceId, name);
+        if (existing is not null)
+            throw new BusinessTermAlreadyExistsException(name);
+
+        var created = await termRepo.CreateAsync(new BusinessTerm
         {
             Id = Guid.NewGuid(),
             WorkspaceId = workspaceId,
-            Name = request.Name.Trim(),
-            Definition = request.Definition?.Trim() ?? string.Empty
-        };
-
-        var created = await termRepo.CreateAsync(term);
+            Name = name,
+            Definition = definition
+        });
 
         Logger.LogInformation(
             "Business term {TermId} created in workspace {WorkspaceId}",
@@ -44,35 +53,40 @@ public class BusinessTermService(
     {
         var term = await termRepo.GetByIdAsync(request.TermId);
         if (term is null || term.WorkspaceId != workspaceId)
-            throw new ValidationException("Business term not found.");
+            throw new BusinessTermNotFoundException();
 
         // Scope the column to the caller's workspace. Without this a participant could map
         // their term onto another workspace's column and corrupt that workspace's projection.
         var column = await columnRepo.GetByIdAsync(workspaceId, request.ColumnId);
         if (column is null)
-            throw new ValidationException("Column not found.");
+            throw new ColumnNotFoundException();
 
-        // A column holds at most one term, so remapping replaces the existing mapping.
-        var existing = await termRepo.GetMappingByColumnAsync(request.ColumnId);
-        if (existing is not null)
+        await unitOfWork.ExecuteAsync(async () =>
         {
-            existing.TermId = request.TermId;
-            await termRepo.UpdateMappingAsync(existing);
-        }
-        else
-        {
-            await termRepo.MapTermToColumnAsync(new TermColumnMapping
+            // A column holds at most one term, so remapping replaces the existing mapping.
+            var existing = await termRepo.GetMappingByColumnAsync(request.ColumnId);
+            if (existing is not null)
             {
-                Id = Guid.NewGuid(),
-                TermId = request.TermId,
-                ColumnId = request.ColumnId
-            });
-        }
+                existing.TermId = request.TermId;
+                await termRepo.UpdateMappingAsync(existing);
+            }
+            else
+            {
+                await termRepo.MapTermToColumnAsync(new TermColumnMapping
+                {
+                    Id = Guid.NewGuid(),
+                    TermId = request.TermId,
+                    ColumnId = request.ColumnId
+                });
+            }
+
+            // The mapping and the projection row it feeds must land together, or the grid shows
+            // a term the catalog does not have (or misses one it does).
+            await projectionService.SyncColumnTermAsync(workspaceId, request.ColumnId, term.Name);
+        });
 
         Logger.LogInformation(
             "Term {TermId} mapped to column {ColumnId} in workspace {WorkspaceId}",
             request.TermId, request.ColumnId, workspaceId);
-
-        await projectionService.SyncColumnTermAsync(workspaceId, request.ColumnId, term.Name);
     }
 }

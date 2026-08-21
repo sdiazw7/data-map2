@@ -7,14 +7,17 @@ public static class MetadataEndpoints
 {
     public static void Map(WebApplication app)
     {
-        app.MapPost("/metadata/upload", async (HttpContext ctx, IMetadataService svc) =>
+        app.MapPost("/metadata/upload", async (HttpContext ctx, IMetadataImportService svc) =>
         {
             var workspaceId = (Guid)ctx.Items["WorkspaceId"]!;
             var participantId = (Guid)ctx.Items["ParticipantId"]!;
             var file = ctx.Request.Form.Files.GetFile("file");
             if (file is null) return Results.BadRequest(new { error = new { code = "NO_FILE", message = "No file uploaded." } });
-            await svc.UploadCsvAsync(workspaceId, participantId, file);
-            return Results.Ok();
+
+            await using var content = file.OpenReadStream();
+            var summary = await svc.ImportCsvAsync(workspaceId, participantId,
+                new CsvUpload(content, file.FileName, file.Length));
+            return Results.Ok(summary);
         }).DisableAntiforgery();
 
         app.MapGet("/metadata/columns", async (

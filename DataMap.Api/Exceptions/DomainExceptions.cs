@@ -13,3 +13,10 @@ public class ValidationException(string message) : Exception(message);
 public class TemplateWorkspaceNotFoundException() : Exception("Template workspace not found.");
 
 public class WorkspaceNotFoundException() : Exception("Workspace not found.");
+
+public class ColumnNotFoundException() : Exception("Column not found.");
+
+public class BusinessTermNotFoundException() : Exception("Business term not found.");
+
+public class BusinessTermAlreadyExistsException(string name)
+    : Exception($"A business term named '{name}' already exists in this workspace.");

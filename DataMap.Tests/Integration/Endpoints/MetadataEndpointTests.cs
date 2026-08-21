@@ -1,5 +1,6 @@
 using DataMap.Api.DTOs;
 using DataMap.Api.Exceptions;
+using DataMap.Api.Services;
 using DataMap.Tests.Integration;
 using Moq;
 using System.Net;
@@ -183,11 +184,11 @@ public class MetadataEndpointTests(TestFixture fixture) : IClassFixture<TestFixt
     [Fact]
     public async Task UploadCsv_ValidFile_Returns200()
     {
-        fixture.MetadataService.Setup(s => s.UploadCsvAsync(
+        fixture.MetadataImportService.Setup(s => s.ImportCsvAsync(
             TestFixture.TestWorkspaceId,
             TestFixture.TestParticipantId,
-            It.IsAny<Microsoft.AspNetCore.Http.IFormFile>()))
-            .Returns(Task.CompletedTask);
+            It.IsAny<CsvUpload>()))
+            .ReturnsAsync(new ImportSummary(1, 1, 1, 1, 0));
 
         var client = fixture.CreateAuthenticatedClient();
         using var content = new MultipartFormDataContent();

@@ -6,6 +6,7 @@ public interface IBusinessTermRepository
 {
     Task<List<BusinessTerm>> GetAllAsync(Guid workspaceId);
     Task<BusinessTerm?> GetByIdAsync(Guid termId);
+    Task<BusinessTerm?> GetByNameAsync(Guid workspaceId, string name);
     Task<BusinessTerm> CreateAsync(BusinessTerm term);
     Task<TermColumnMapping> MapTermToColumnAsync(TermColumnMapping mapping);
     Task<TermColumnMapping?> GetMappingByColumnAsync(Guid columnId);

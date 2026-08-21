@@ -4,18 +4,14 @@ using DataMap.Api.Exceptions;
 using DataMap.Api.Models;
 using DataMap.Api.Repositories;
 using DataMap.Api.Services;
-using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Moq;
-using System.Text;
 
 namespace DataMap.Tests.Unit.Services;
 
 public class MetadataServiceTests
 {
     private readonly Mock<IColumnRepository> _columnRepo = new();
-    private readonly Mock<ISchemaRepository> _schemaRepo = new();
-    private readonly Mock<ITableRepository> _tableRepo = new();
     private readonly Mock<IProjectionRepository> _projectionRepo = new();
     private readonly Mock<IMetadataChangeRepository> _changeRepo = new();
     private readonly Mock<IProjectionService> _projectionService = new();
@@ -35,35 +31,11 @@ public class MetadataServiceTests
 
     private MetadataService CreateService() => new(
         _columnRepo.Object,
-        _schemaRepo.Object,
-        _tableRepo.Object,
         _projectionRepo.Object,
         _changeRepo.Object,
         _projectionService.Object,
         _unitOfWork.Object,
         _logger.Object);
-
-    private static IFormFile MakeCsvFile(string csvContent, string fileName = "columns.csv")
-    {
-        var bytes = Encoding.UTF8.GetBytes(csvContent);
-        var mock = new Mock<IFormFile>();
-        mock.Setup(f => f.OpenReadStream()).Returns(new MemoryStream(bytes));
-        mock.Setup(f => f.Length).Returns(bytes.Length);
-        mock.Setup(f => f.FileName).Returns(fileName);
-        return mock.Object;
-    }
-
-    /// <summary>Wires the three batch upserts so an upload reaches the projection refresh.</summary>
-    private void SetupUpsertChain(Guid workspaceId, Dictionary<string, Guid> schemas,
-        Dictionary<(Guid SchemaId, string Name), Guid> tables)
-    {
-        _schemaRepo.Setup(r => r.UpsertManyAsync(workspaceId, It.IsAny<IReadOnlyCollection<string>>()))
-            .ReturnsAsync(schemas);
-        _tableRepo.Setup(r => r.UpsertManyAsync(workspaceId, It.IsAny<IReadOnlyCollection<(Guid SchemaId, string Name)>>()))
-            .ReturnsAsync(tables);
-        _columnRepo.Setup(r => r.UpsertManyAsync(workspaceId, It.IsAny<IReadOnlyCollection<ColumnImport>>()))
-            .ReturnsAsync(new ColumnUpsertResult(1, 0, false));
-    }
 
     private void SetupColumns(Guid workspaceId, params Column[] columns)
     {
@@ -179,224 +151,6 @@ public class MetadataServiceTests
         await CreateService().GetColumnsAsync(workspaceId, new MetadataColumnsQuery(Limit: 1000));
 
         _projectionRepo.Verify(r => r.QueryAsync(workspaceId, 1000, 0, null, false, null, "column_name", "asc"), Times.Once);
-    }
-
-    // ── UploadCsvAsync ───────────────────────────────────────────────────────
-
-    [Fact]
-    public async Task UploadCsvAsync_ValidCsv_UpsertsEveryColumnInOneBatch()
-    {
-        var workspaceId = Guid.NewGuid();
-        var schemaId = Guid.NewGuid();
-        var tableId = Guid.NewGuid();
-        var csv = "schema_name,table_name,column_name,data_type\nsales,orders,id,uuid\nsales,orders,total,numeric";
-
-        SetupUpsertChain(workspaceId,
-            new Dictionary<string, Guid> { ["sales"] = schemaId },
-            new Dictionary<(Guid SchemaId, string Name), Guid> { [(schemaId, "orders")] = tableId });
-
-        IReadOnlyCollection<ColumnImport>? imported = null;
-        _columnRepo.Setup(r => r.UpsertManyAsync(workspaceId, It.IsAny<IReadOnlyCollection<ColumnImport>>()))
-            .Callback<Guid, IReadOnlyCollection<ColumnImport>>((_, c) => imported = c)
-            .ReturnsAsync(new ColumnUpsertResult(2, 0, false));
-
-        await CreateService().UploadCsvAsync(workspaceId, Guid.NewGuid(), MakeCsvFile(csv));
-
-        _columnRepo.Verify(r => r.UpsertManyAsync(workspaceId, It.IsAny<IReadOnlyCollection<ColumnImport>>()), Times.Once);
-        Assert.Equal(2, imported!.Count);
-        Assert.Contains(imported, c => c.TableId == tableId && c.Name == "id" && c.DataType == "uuid");
-        Assert.Contains(imported, c => c.TableId == tableId && c.Name == "total" && c.DataType == "numeric");
-    }
-
-    [Fact]
-    public async Task UploadCsvAsync_DeduplicatesSchemasAndTables()
-    {
-        var workspaceId = Guid.NewGuid();
-        var schemaId = Guid.NewGuid();
-        var tableId = Guid.NewGuid();
-        var csv = "schema_name,table_name,column_name,data_type\nsales,orders,id,uuid\nsales,orders,total,numeric";
-
-        SetupUpsertChain(workspaceId,
-            new Dictionary<string, Guid> { ["sales"] = schemaId },
-            new Dictionary<(Guid SchemaId, string Name), Guid> { [(schemaId, "orders")] = tableId });
-
-        IReadOnlyCollection<(Guid SchemaId, string Name)>? tableKeys = null;
-        _tableRepo.Setup(r => r.UpsertManyAsync(workspaceId, It.IsAny<IReadOnlyCollection<(Guid SchemaId, string Name)>>()))
-            .Callback<Guid, IReadOnlyCollection<(Guid SchemaId, string Name)>>((_, t) => tableKeys = t)
-            .ReturnsAsync(new Dictionary<(Guid SchemaId, string Name), Guid> { [(schemaId, "orders")] = tableId });
-
-        await CreateService().UploadCsvAsync(workspaceId, Guid.NewGuid(), MakeCsvFile(csv));
-
-        _schemaRepo.Verify(r => r.UpsertManyAsync(workspaceId, It.IsAny<IReadOnlyCollection<string>>()), Times.Once);
-        Assert.Single(tableKeys!);
-    }
-
-    [Fact]
-    public async Task UploadCsvAsync_MultipleSchemas_PassesEachToTheBatch()
-    {
-        var workspaceId = Guid.NewGuid();
-        var salesId = Guid.NewGuid();
-        var mktId = Guid.NewGuid();
-        var t1 = Guid.NewGuid();
-        var t2 = Guid.NewGuid();
-        var csv = "schema_name,table_name,column_name,data_type\nsales,orders,id,uuid\nmarketing,campaigns,name,varchar";
-
-        SetupUpsertChain(workspaceId,
-            new Dictionary<string, Guid> { ["sales"] = salesId, ["marketing"] = mktId },
-            new Dictionary<(Guid SchemaId, string Name), Guid>
-            {
-                [(salesId, "orders")] = t1,
-                [(mktId, "campaigns")] = t2
-            });
-
-        IReadOnlyCollection<string>? names = null;
-        _schemaRepo.Setup(r => r.UpsertManyAsync(workspaceId, It.IsAny<IReadOnlyCollection<string>>()))
-            .Callback<Guid, IReadOnlyCollection<string>>((_, n) => names = n)
-            .ReturnsAsync(new Dictionary<string, Guid> { ["sales"] = salesId, ["marketing"] = mktId });
-
-        await CreateService().UploadCsvAsync(workspaceId, Guid.NewGuid(), MakeCsvFile(csv));
-
-        Assert.Contains("sales", names!);
-        Assert.Contains("marketing", names!);
-    }
-
-    [Fact]
-    public async Task UploadCsvAsync_RefreshesProjection()
-    {
-        var workspaceId = Guid.NewGuid();
-        var schemaId = Guid.NewGuid();
-        var tableId = Guid.NewGuid();
-        var csv = "schema_name,table_name,column_name,data_type\nsales,orders,id,uuid";
-
-        SetupUpsertChain(workspaceId,
-            new Dictionary<string, Guid> { ["sales"] = schemaId },
-            new Dictionary<(Guid SchemaId, string Name), Guid> { [(schemaId, "orders")] = tableId });
-
-        await CreateService().UploadCsvAsync(workspaceId, Guid.NewGuid(), MakeCsvFile(csv));
-
-        _projectionService.Verify(p => p.RefreshAsync(workspaceId), Times.Once);
-    }
-
-    [Fact]
-    public async Task UploadCsvAsync_RunsEntirelyInsideOneTransaction()
-    {
-        var workspaceId = Guid.NewGuid();
-        var schemaId = Guid.NewGuid();
-        var tableId = Guid.NewGuid();
-        var csv = "schema_name,table_name,column_name,data_type\nsales,orders,id,uuid";
-
-        SetupUpsertChain(workspaceId,
-            new Dictionary<string, Guid> { ["sales"] = schemaId },
-            new Dictionary<(Guid SchemaId, string Name), Guid> { [(schemaId, "orders")] = tableId });
-
-        await CreateService().UploadCsvAsync(workspaceId, Guid.NewGuid(), MakeCsvFile(csv));
-
-        _unitOfWork.Verify(u => u.ExecuteAsync(It.IsAny<Func<Task>>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task UploadCsvAsync_TrimsWhitespaceAroundValues()
-    {
-        var workspaceId = Guid.NewGuid();
-        var schemaId = Guid.NewGuid();
-        var tableId = Guid.NewGuid();
-        var csv = "schema_name,table_name,column_name,data_type\n  sales , orders ,  id  , uuid ";
-
-        SetupUpsertChain(workspaceId,
-            new Dictionary<string, Guid> { ["sales"] = schemaId },
-            new Dictionary<(Guid SchemaId, string Name), Guid> { [(schemaId, "orders")] = tableId });
-
-        IReadOnlyCollection<ColumnImport>? imported = null;
-        _columnRepo.Setup(r => r.UpsertManyAsync(workspaceId, It.IsAny<IReadOnlyCollection<ColumnImport>>()))
-            .Callback<Guid, IReadOnlyCollection<ColumnImport>>((_, c) => imported = c)
-            .ReturnsAsync(new ColumnUpsertResult(1, 0, false));
-
-        await CreateService().UploadCsvAsync(workspaceId, Guid.NewGuid(), MakeCsvFile(csv));
-
-        Assert.Equal("id", imported!.Single().Name);
-        Assert.Equal("uuid", imported!.Single().DataType);
-    }
-
-    [Fact]
-    public async Task UploadCsvAsync_EmptyFile_ThrowsValidationException()
-    {
-        await Assert.ThrowsAsync<ValidationException>(() =>
-            CreateService().UploadCsvAsync(Guid.NewGuid(), Guid.NewGuid(), MakeCsvFile("")));
-    }
-
-    [Fact]
-    public async Task UploadCsvAsync_NonCsvExtension_ThrowsValidationException()
-    {
-        var csv = "schema_name,table_name,column_name,data_type\nsales,orders,id,uuid";
-
-        await Assert.ThrowsAsync<ValidationException>(() =>
-            CreateService().UploadCsvAsync(Guid.NewGuid(), Guid.NewGuid(), MakeCsvFile(csv, "columns.xlsx")));
-    }
-
-    [Fact]
-    public async Task UploadCsvAsync_WrongHeaders_ThrowsValidationExceptionNotUnhandled()
-    {
-        var csv = "foo,bar\n1,2";
-
-        var ex = await Assert.ThrowsAsync<ValidationException>(() =>
-            CreateService().UploadCsvAsync(Guid.NewGuid(), Guid.NewGuid(), MakeCsvFile(csv)));
-
-        Assert.Contains("schema_name", ex.Message);
-    }
-
-    [Fact]
-    public async Task UploadCsvAsync_HeaderOnly_ThrowsValidationException()
-    {
-        var csv = "schema_name,table_name,column_name,data_type";
-
-        await Assert.ThrowsAsync<ValidationException>(() =>
-            CreateService().UploadCsvAsync(Guid.NewGuid(), Guid.NewGuid(), MakeCsvFile(csv)));
-    }
-
-    [Fact]
-    public async Task UploadCsvAsync_BlankRequiredField_ThrowsValidationExceptionNamingTheRow()
-    {
-        var csv = "schema_name,table_name,column_name,data_type\nsales,orders,,uuid";
-
-        var ex = await Assert.ThrowsAsync<ValidationException>(() =>
-            CreateService().UploadCsvAsync(Guid.NewGuid(), Guid.NewGuid(), MakeCsvFile(csv)));
-
-        Assert.Contains("row 2", ex.Message);
-        Assert.Contains("column_name", ex.Message);
-    }
-
-    [Fact]
-    public async Task UploadCsvAsync_InvalidRows_WritesNothing()
-    {
-        var workspaceId = Guid.NewGuid();
-        var csv = "schema_name,table_name,column_name,data_type\nsales,orders,,uuid";
-
-        await Assert.ThrowsAsync<ValidationException>(() =>
-            CreateService().UploadCsvAsync(workspaceId, Guid.NewGuid(), MakeCsvFile(csv)));
-
-        _schemaRepo.Verify(r => r.UpsertManyAsync(It.IsAny<Guid>(), It.IsAny<IReadOnlyCollection<string>>()), Times.Never);
-        _columnRepo.Verify(r => r.UpsertManyAsync(It.IsAny<Guid>(), It.IsAny<IReadOnlyCollection<ColumnImport>>()), Times.Never);
-        _projectionService.Verify(p => p.RefreshAsync(It.IsAny<Guid>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task UploadCsvAsync_ConcurrentEditConflict_ThrowsVersionConflictException()
-    {
-        var workspaceId = Guid.NewGuid();
-        var schemaId = Guid.NewGuid();
-        var tableId = Guid.NewGuid();
-        var csv = "schema_name,table_name,column_name,data_type\nsales,orders,id,uuid";
-
-        SetupUpsertChain(workspaceId,
-            new Dictionary<string, Guid> { ["sales"] = schemaId },
-            new Dictionary<(Guid SchemaId, string Name), Guid> { [(schemaId, "orders")] = tableId });
-        _columnRepo.Setup(r => r.UpsertManyAsync(workspaceId, It.IsAny<IReadOnlyCollection<ColumnImport>>()))
-            .ReturnsAsync(new ColumnUpsertResult(0, 0, true));
-
-        await Assert.ThrowsAsync<VersionConflictException>(() =>
-            CreateService().UploadCsvAsync(workspaceId, Guid.NewGuid(), MakeCsvFile(csv)));
-
-        _projectionService.Verify(p => p.RefreshAsync(It.IsAny<Guid>()), Times.Never);
     }
 
     // ── BulkUpdateAsync ──────────────────────────────────────────────────────

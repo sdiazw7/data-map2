@@ -19,6 +19,12 @@ public class BusinessTermRepository(AppDbContext db) : IBusinessTermRepository
         return await db.BusinessTerms.FirstOrDefaultAsync(t => t.Id == termId);
     }
 
+    public async Task<BusinessTerm?> GetByNameAsync(Guid workspaceId, string name)
+    {
+        return await db.BusinessTerms
+            .FirstOrDefaultAsync(t => t.WorkspaceId == workspaceId && t.Name == name);
+    }
+
     public async Task<BusinessTerm> CreateAsync(BusinessTerm term)
     {
         db.BusinessTerms.Add(term);

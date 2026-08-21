@@ -9,8 +9,6 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddDataMapServices(this IServiceCollection services, IConfiguration config)
     {
-        services.AddHttpContextAccessor();
-
         services.AddCors(options =>
         {
             options.AddDefaultPolicy(policy =>
@@ -42,6 +40,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IDevAccessService, DevAccessService>();
         services.AddScoped<IWorkspaceCopyService, WorkspaceCopyService>();
         services.AddScoped<IMetadataService, MetadataService>();
+        services.AddScoped<IMetadataImportService, MetadataImportService>();
         services.AddScoped<IBusinessTermService, BusinessTermService>();
         services.AddScoped<IProjectionService, ProjectionService>();
 

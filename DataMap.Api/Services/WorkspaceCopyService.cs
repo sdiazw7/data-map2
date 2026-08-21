@@ -1,3 +1,4 @@
+using DataMap.Api.Exceptions;
 using DataMap.Api.Models;
 using DataMap.Api.Repositories;
 using Microsoft.Extensions.Logging;
@@ -14,13 +15,18 @@ public class WorkspaceCopyService(
 {
     public async Task<Workspace> CopyAsync(Guid templateWorkspaceId, string workspaceName)
     {
-        var now = DateTime.UtcNow;
+        // The caller may be acting on an invite created long ago. Re-check the template here
+        // rather than trusting that it still exists and is still a template — otherwise a
+        // deleted or unflagged source silently produces an empty workspace.
+        var template = await workspaceRepo.GetByIdAsync(templateWorkspaceId);
+        if (template is null || !template.IsTemplate)
+            throw new TemplateWorkspaceNotFoundException();
 
         var newWorkspace = new Workspace
         {
             Id = Guid.NewGuid(),
             Name = workspaceName,
-            CreatedAt = now,
+            CreatedAt = DateTime.UtcNow,
             IsTemplate = false,
             SourceTemplateId = templateWorkspaceId,
         };
@@ -30,48 +36,40 @@ public class WorkspaceCopyService(
         var tables = await tableRepo.GetAllByWorkspaceAsync(templateWorkspaceId);
         var columns = await columnRepo.GetAllByWorkspaceAsync(templateWorkspaceId);
 
-        // Map old schema IDs → new schema IDs
-        var schemaIdMap = new Dictionary<Guid, Guid>();
-        foreach (var schema in schemas)
-        {
-            var newId = Guid.NewGuid();
-            schemaIdMap[schema.Id] = newId;
-            await schemaRepo.UpsertAsync(newWorkspace.Id, schema.Name);
-            // UpsertAsync creates with a generated ID, so we re-fetch to get the actual ID for the table map
-        }
+        // Index the source once. Walking these lists per column instead is quadratic, and a
+        // template can hold 100k+ columns.
+        var schemasById = schemas.ToDictionary(s => s.Id);
+        var tablesById = tables.ToDictionary(t => t.Id);
 
-        // Re-fetch new schemas to build accurate ID map for tables
-        var newSchemas = await schemaRepo.GetAllByWorkspaceAsync(newWorkspace.Id);
-        var newSchemaByName = newSchemas.ToDictionary(s => s.Name, s => s.Id);
+        // Each level is copied as a single batch, and the ids come back keyed by name — which is
+        // what lets the level below resolve its parent without a per-row lookup.
+        var newSchemaIds = await schemaRepo.UpsertManyAsync(
+            newWorkspace.Id,
+            schemas.Select(s => s.Name).ToList());
 
-        // Map old table IDs → new table IDs
-        var tableIdMap = new Dictionary<Guid, Guid>();
-        foreach (var table in tables)
-        {
-            var templateSchema = schemas.First(s => s.Id == table.SchemaId);
-            var newSchemaId = newSchemaByName[templateSchema.Name];
-            await tableRepo.UpsertAsync(newWorkspace.Id, newSchemaId, table.Name);
-        }
+        var newTableIds = await tableRepo.UpsertManyAsync(
+            newWorkspace.Id,
+            tables
+                .Select(t => (SchemaId: newSchemaIds[schemasById[t.SchemaId].Name], t.Name))
+                .ToList());
 
-        // Re-fetch new tables to build accurate ID map for columns
-        var newTables = await tableRepo.GetAllByWorkspaceAsync(newWorkspace.Id);
-        var newTableBySchemaAndName = newTables.ToDictionary(
-            t => (SchemaId: t.SchemaId, t.Name),
-            t => t.Id);
-
-        foreach (var column in columns)
-        {
-            var templateTable = tables.First(t => t.Id == column.TableId);
-            var templateSchema = schemas.First(s => s.Id == templateTable.SchemaId);
-            var newSchemaId = newSchemaByName[templateSchema.Name];
-            var newTableId = newTableBySchemaAndName[(newSchemaId, templateTable.Name)];
-            await columnRepo.UpsertAsync(newWorkspace.Id, newTableId, column.Name, column.DataType);
-        }
+        await columnRepo.UpsertManyAsync(
+            newWorkspace.Id,
+            columns
+                .Select(c =>
+                {
+                    var sourceTable = tablesById[c.TableId];
+                    var newSchemaId = newSchemaIds[schemasById[sourceTable.SchemaId].Name];
+                    return new ColumnImport(newTableIds[(newSchemaId, sourceTable.Name)], c.Name, c.DataType);
+                })
+                .ToList());
 
         await projectionRepo.RefreshAsync(newWorkspace.Id);
 
-        Logger.LogInformation("Copied template workspace {TemplateWorkspaceId} to new workspace {NewWorkspaceId}",
-            templateWorkspaceId, newWorkspace.Id);
+        Logger.LogInformation(
+            "Copied template workspace {TemplateWorkspaceId} to new workspace {NewWorkspaceId}: "
+            + "{SchemaCount} schemas, {TableCount} tables, {ColumnCount} columns",
+            templateWorkspaceId, newWorkspace.Id, schemas.Count, tables.Count, columns.Count);
 
         return newWorkspace;
     }
