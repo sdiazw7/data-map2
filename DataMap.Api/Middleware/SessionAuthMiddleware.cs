@@ -1,66 +1,63 @@
-using System.Text.Json;
 using DataMap.Api.Repositories;
+using Microsoft.AspNetCore.Authorization;
 
 namespace DataMap.Api.Middleware;
 
 public class SessionAuthMiddleware(RequestDelegate next)
 {
-    public async Task InvokeAsync(HttpContext context, ISessionRepository sessionRepo, IWebHostEnvironment env)
+    private static readonly TimeSpan SessionLifetime = TimeSpan.FromDays(30);
+
+    public async Task InvokeAsync(HttpContext context, ISessionRepository sessionRepo)
     {
-        // Skip auth for public paths. /dev is only ever mapped in Development (see Program.cs),
-        // but the environment check here means the bypass is inert even if that ever changes.
-        if (context.Request.Path.StartsWithSegments("/health") ||
-            context.Request.Path.StartsWithSegments("/invite") ||
-            (env.IsDevelopment() && context.Request.Path.StartsWithSegments("/dev")))
+        // Public routes opt out individually via AllowAnonymous. This replaced a path-prefix
+        // allowlist, under which "/invite" covered the two public invite routes only because
+        // /invites happened to be a different segment — renaming one for consistency would
+        // have exposed invite creation. Metadata travels with the route, so it cannot drift.
+        var endpoint = context.GetEndpoint();
+        if (endpoint?.Metadata.GetMetadata<IAllowAnonymous>() is not null)
+        {
+            await next(context);
+            return;
+        }
+
+        // An unmatched path has no endpoint and so no opt-out. Let it through to the routing
+        // middleware, which answers 404 — reporting 401 for a route that does not exist would
+        // turn the API's shape into something an unauthenticated caller could probe.
+        if (endpoint is null)
         {
             await next(context);
             return;
         }
 
         if (!context.Request.Cookies.TryGetValue(Endpoints.SessionCookie.Name, out var cookieValue)
-            || string.IsNullOrWhiteSpace(cookieValue))
+            || string.IsNullOrWhiteSpace(cookieValue)
+            || !Guid.TryParse(cookieValue, out var sessionId))
         {
-            await WriteUnauthorizedAsync(context, "UNAUTHORIZED", "Authentication required.");
-            return;
-        }
-
-        if (!Guid.TryParse(cookieValue, out var sessionId))
-        {
-            await WriteUnauthorizedAsync(context, "UNAUTHORIZED", "Authentication required.");
+            await Unauthorized(context, "UNAUTHORIZED", "Authentication required.");
             return;
         }
 
         var session = await sessionRepo.GetByIdAsync(sessionId);
         if (session is null)
         {
-            await WriteUnauthorizedAsync(context, "UNAUTHORIZED", "Authentication required.");
+            await Unauthorized(context, "UNAUTHORIZED", "Authentication required.");
             return;
         }
 
-        if (session.LastSeenAt < DateTime.UtcNow.AddDays(-30))
+        if (session.LastSeenAt < DateTime.UtcNow.Subtract(SessionLifetime))
         {
-            await WriteUnauthorizedAsync(context, "SESSION_EXPIRED", "Your session has expired. Please sign in again.");
+            await Unauthorized(context, "SESSION_EXPIRED", "Your session has expired. Please sign in again.");
             return;
         }
 
         await sessionRepo.UpdateLastSeenAtAsync(sessionId, DateTime.UtcNow);
 
-        context.Items["ParticipantId"] = session.ParticipantId;
-        context.Items["WorkspaceId"] = session.WorkspaceId;
+        context.Items[Endpoints.RequestContext.ParticipantIdKey] = session.ParticipantId;
+        context.Items[Endpoints.RequestContext.WorkspaceIdKey] = session.WorkspaceId;
 
         await next(context);
     }
 
-    private static async Task WriteUnauthorizedAsync(HttpContext context, string code, string message)
-    {
-        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-        context.Response.ContentType = "application/json";
-
-        var body = JsonSerializer.Serialize(new
-        {
-            error = new { code, message }
-        }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
-
-        await context.Response.WriteAsync(body);
-    }
+    private static Task Unauthorized(HttpContext context, string code, string message)
+        => ApiErrorWriter.WriteAsync(context, StatusCodes.Status401Unauthorized, code, message);
 }

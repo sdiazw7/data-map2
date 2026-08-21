@@ -14,13 +14,30 @@ public class BusinessTermService(
     IUnitOfWork unitOfWork,
     ILogger<BusinessTermService> logger) : BaseService(logger), IBusinessTermService
 {
+    private const int MaxLimit = 1_000;
     private const int MaxNameLength = 200;
     private const int MaxDefinitionLength = 4_000;
 
-    public async Task<List<BusinessTermDto>> GetAllAsync(Guid workspaceId)
+    public async Task<PagedResult<BusinessTermDto>> GetAllAsync(Guid workspaceId, PageQuery page)
     {
-        var terms = await termRepo.GetAllAsync(workspaceId);
-        return terms.Select(t => new BusinessTermDto(t.Id, t.Name, t.Definition)).ToList();
+        RequirePaging(page.Limit, page.Offset, MaxLimit);
+
+        var (terms, total) = await termRepo.GetAllAsync(workspaceId, page.Limit, page.Offset);
+
+        var items = terms.Select(t => new BusinessTermDto(t.Id, t.Name, t.Definition)).ToList();
+        return new PagedResult<BusinessTermDto>(items, total, page.Limit, page.Offset);
+    }
+
+    public async Task<BusinessTermDto> GetByIdAsync(Guid workspaceId, Guid termId)
+    {
+        var term = await termRepo.GetByIdAsync(termId);
+
+        // Scoped to the caller's workspace, so a term id from another workspace reads as
+        // absent rather than confirming it exists.
+        if (term is null || term.WorkspaceId != workspaceId)
+            throw new BusinessTermNotFoundException();
+
+        return new BusinessTermDto(term.Id, term.Name, term.Definition);
     }
 
     public async Task<BusinessTermDto> CreateAsync(Guid workspaceId, BusinessTermCreateRequest request)
@@ -49,30 +66,44 @@ public class BusinessTermService(
         return new BusinessTermDto(created.Id, created.Name, created.Definition);
     }
 
-    public async Task MapToColumnAsync(Guid workspaceId, TermMappingRequest request)
+    public async Task MapToColumnAsync(Guid workspaceId, Guid columnId, Guid termId)
     {
-        var term = await termRepo.GetByIdAsync(request.TermId);
+        var term = await termRepo.GetByIdAsync(termId);
         if (term is null || term.WorkspaceId != workspaceId)
             throw new BusinessTermNotFoundException();
 
+        await SetTermAsync(workspaceId, columnId, termId, term.Name);
+
+        Logger.LogInformation(
+            "Term {TermId} mapped to column {ColumnId} in workspace {WorkspaceId}",
+            termId, columnId, workspaceId);
+    }
+
+    public async Task UnmapFromColumnAsync(Guid workspaceId, Guid columnId)
+    {
+        await SetTermAsync(workspaceId, columnId, null, null);
+
+        Logger.LogInformation(
+            "Term cleared from column {ColumnId} in workspace {WorkspaceId}",
+            columnId, workspaceId);
+    }
+
+    private async Task SetTermAsync(Guid workspaceId, Guid columnId, Guid? termId, string? termName)
+    {
         // Scope the column to the caller's workspace. Without this a participant could map
         // their term onto another workspace's column and corrupt that workspace's projection.
-        var column = await columnRepo.GetByIdAsync(workspaceId, request.ColumnId);
+        var column = await columnRepo.GetByIdAsync(workspaceId, columnId);
         if (column is null)
             throw new ColumnNotFoundException();
 
         await unitOfWork.ExecuteAsync(async () =>
         {
             // A column holds at most one term, so this always replaces whatever was mapped before.
-            await columnRepo.SetBusinessTermAsync(workspaceId, request.ColumnId, request.TermId);
+            await columnRepo.SetBusinessTermAsync(workspaceId, columnId, termId);
 
             // The column and the projection row it feeds must land together, or the grid shows
             // a term the catalog does not have (or misses one it does).
-            await projectionService.SyncColumnTermAsync(workspaceId, request.ColumnId, term.Name);
+            await projectionService.SyncColumnTermAsync(workspaceId, columnId, termName);
         });
-
-        Logger.LogInformation(
-            "Term {TermId} mapped to column {ColumnId} in workspace {WorkspaceId}",
-            request.TermId, request.ColumnId, workspaceId);
     }
 }

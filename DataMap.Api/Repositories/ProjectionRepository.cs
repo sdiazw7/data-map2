@@ -6,7 +6,7 @@ namespace DataMap.Api.Repositories;
 
 public class ProjectionRepository(AppDbContext db) : IProjectionRepository
 {
-    public async Task<List<ColumnCatalogEditor>> QueryAsync(
+    public async Task<(List<ColumnCatalogEditor> Rows, int Total)> QueryAsync(
         Guid workspaceId, int limit, int offset, string? search, bool undocumentedOnly, string? tableName, string sortBy, string sortDir)
     {
         var query = db.ColumnCatalogEditor.Where(c => c.WorkspaceId == workspaceId);
@@ -23,11 +23,15 @@ public class ProjectionRepository(AppDbContext db) : IProjectionRepository
         if (!string.IsNullOrWhiteSpace(tableName))
             query = query.Where(c => c.TableName == tableName);
 
+        // Counted before paging is applied, so it reports every row the filters match rather
+        // than the size of this page.
+        var total = await query.CountAsync();
+
         var descending = sortDir == "desc";
         IOrderedQueryable<ColumnCatalogEditor> ordered = sortBy switch
         {
-            "table_name" => descending ? query.OrderByDescending(c => c.TableName) : query.OrderBy(c => c.TableName),
-            "data_type" => descending ? query.OrderByDescending(c => c.DataType) : query.OrderBy(c => c.DataType),
+            "tableName" => descending ? query.OrderByDescending(c => c.TableName) : query.OrderBy(c => c.TableName),
+            "dataType" => descending ? query.OrderByDescending(c => c.DataType) : query.OrderBy(c => c.DataType),
             "owner" => descending ? query.OrderByDescending(c => c.Owner) : query.OrderBy(c => c.Owner),
             _ => descending ? query.OrderByDescending(c => c.ColumnName) : query.OrderBy(c => c.ColumnName),
         };
@@ -37,17 +41,26 @@ public class ProjectionRepository(AppDbContext db) : IProjectionRepository
         // sort would force Postgres to sort the whole result set instead.
         query = descending ? ordered.ThenByDescending(c => c.ColumnId) : ordered.ThenBy(c => c.ColumnId);
 
-        return await query.AsNoTracking().Skip(offset).Take(limit).ToListAsync();
+        var rows = await query.AsNoTracking().Skip(offset).Take(limit).ToListAsync();
+        return (rows, total);
     }
 
-    public async Task<List<string>> GetDistinctTableNamesAsync(Guid workspaceId)
+    public async Task<(List<string> Names, int Total)> GetDistinctTableNamesAsync(Guid workspaceId, int limit, int offset)
     {
-        return await db.ColumnCatalogEditor
+        var distinct = db.ColumnCatalogEditor
             .Where(c => c.WorkspaceId == workspaceId)
             .Select(c => c.TableName)
-            .Distinct()
+            .Distinct();
+
+        var total = await distinct.CountAsync();
+
+        var names = await distinct
             .OrderBy(t => t)
+            .Skip(offset)
+            .Take(limit)
             .ToListAsync();
+
+        return (names, total);
     }
 
     public async Task SyncColumnsAsync(Guid workspaceId, IReadOnlyCollection<Column> columns)

@@ -20,3 +20,5 @@ public class BusinessTermNotFoundException() : Exception("Business term not foun
 
 public class BusinessTermAlreadyExistsException(string name)
     : Exception($"A business term named '{name}' already exists in this workspace.");
+
+public class UnauthorizedException() : Exception("Authentication required.");

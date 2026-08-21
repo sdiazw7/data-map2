@@ -56,21 +56,22 @@ public class MetadataServiceTests
                     DataType = "uuid", Description = "PK", ExampleValue = "abc", Owner = "alice",
                     BusinessTerm = "Order ID", Version = 3 }
         };
-        _projectionRepo.Setup(r => r.QueryAsync(workspaceId, 200, 0, null, false, null, "column_name", "asc")).ReturnsAsync(rows);
+        _projectionRepo.Setup(r => r.QueryAsync(workspaceId, 200, 0, null, false, null, "columnName", "asc"))
+            .ReturnsAsync((rows, 1));
 
         var result = await CreateService().GetColumnsAsync(workspaceId, new MetadataColumnsQuery());
 
-        Assert.Single(result);
-        Assert.Equal(columnId, result[0].ColumnId);
-        Assert.Equal("sales", result[0].SchemaName);
-        Assert.Equal("orders", result[0].TableName);
-        Assert.Equal("id", result[0].ColumnName);
-        Assert.Equal("uuid", result[0].DataType);
-        Assert.Equal("PK", result[0].Description);
-        Assert.Equal("abc", result[0].ExampleValue);
-        Assert.Equal("alice", result[0].Owner);
-        Assert.Equal("Order ID", result[0].BusinessTerm);
-        Assert.Equal(3, result[0].Version);
+        Assert.Single(result.Items);
+        Assert.Equal(columnId, result.Items[0].ColumnId);
+        Assert.Equal("sales", result.Items[0].SchemaName);
+        Assert.Equal("orders", result.Items[0].TableName);
+        Assert.Equal("id", result.Items[0].ColumnName);
+        Assert.Equal("uuid", result.Items[0].DataType);
+        Assert.Equal("PK", result.Items[0].Description);
+        Assert.Equal("abc", result.Items[0].ExampleValue);
+        Assert.Equal("alice", result.Items[0].Owner);
+        Assert.Equal("Order ID", result.Items[0].BusinessTerm);
+        Assert.Equal(3, result.Items[0].Version);
     }
 
     [Fact]
@@ -78,11 +79,32 @@ public class MetadataServiceTests
     {
         var workspaceId = Guid.NewGuid();
         _projectionRepo.Setup(r => r.QueryAsync(workspaceId, It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<string>()))
-            .ReturnsAsync([]);
+            .ReturnsAsync((new List<ColumnCatalogEditor>(), 0));
 
         var result = await CreateService().GetColumnsAsync(workspaceId, new MetadataColumnsQuery());
 
-        Assert.Empty(result);
+        Assert.Empty(result.Items);
+        Assert.Equal(0, result.Total);
+    }
+
+    [Fact]
+    public async Task GetColumnsAsync_ReportsRepoTotalNotPageLength()
+    {
+        var workspaceId = Guid.NewGuid();
+        var rows = new List<ColumnCatalogEditor>
+        {
+            new() { ColumnId = Guid.NewGuid(), SchemaName = "sales", TableName = "orders",
+                    ColumnName = "id", DataType = "uuid", Version = 1 }
+        };
+        _projectionRepo.Setup(r => r.QueryAsync(workspaceId, 1, 0, null, false, null, "columnName", "asc"))
+            .ReturnsAsync((rows, 104318));
+
+        var result = await CreateService().GetColumnsAsync(workspaceId, new MetadataColumnsQuery(Limit: 1));
+
+        Assert.Single(result.Items);
+        Assert.Equal(104318, result.Total);
+        Assert.Equal(1, result.Limit);
+        Assert.Equal(0, result.Offset);
     }
 
     [Fact]
@@ -90,11 +112,11 @@ public class MetadataServiceTests
     {
         var workspaceId = Guid.NewGuid();
         var query = new MetadataColumnsQuery(Limit: 50, Offset: 100, Search: "customer", UndocumentedOnly: true);
-        _projectionRepo.Setup(r => r.QueryAsync(workspaceId, 50, 100, "customer", true, null, "column_name", "asc")).ReturnsAsync([]);
+        _projectionRepo.Setup(r => r.QueryAsync(workspaceId, 50, 100, "customer", true, null, "columnName", "asc")).ReturnsAsync((new List<ColumnCatalogEditor>(), 0));
 
         await CreateService().GetColumnsAsync(workspaceId, query);
 
-        _projectionRepo.Verify(r => r.QueryAsync(workspaceId, 50, 100, "customer", true, null, "column_name", "asc"), Times.Once);
+        _projectionRepo.Verify(r => r.QueryAsync(workspaceId, 50, 100, "customer", true, null, "columnName", "asc"), Times.Once);
     }
 
     [Fact]
@@ -105,6 +127,33 @@ public class MetadataServiceTests
 
         await Assert.ThrowsAsync<ValidationException>(() =>
             CreateService().GetColumnsAsync(workspaceId, query));
+    }
+
+    [Fact]
+    public async Task GetColumnsAsync_StorageStyleSortName_ThrowsValidationException()
+    {
+        // sortBy takes the response field names now; the old snake_case spelling is not a
+        // second accepted vocabulary.
+        var workspaceId = Guid.NewGuid();
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            CreateService().GetColumnsAsync(workspaceId, new MetadataColumnsQuery(SortBy: "column_name")));
+    }
+
+    [Theory]
+    [InlineData("columnName")]
+    [InlineData("tableName")]
+    [InlineData("dataType")]
+    [InlineData("owner")]
+    public async Task GetColumnsAsync_SortableFields_AreAccepted(string sortBy)
+    {
+        var workspaceId = Guid.NewGuid();
+        _projectionRepo.Setup(r => r.QueryAsync(workspaceId, 200, 0, null, false, null, sortBy, "asc"))
+            .ReturnsAsync((new List<ColumnCatalogEditor>(), 0));
+
+        await CreateService().GetColumnsAsync(workspaceId, new MetadataColumnsQuery(SortBy: sortBy));
+
+        _projectionRepo.Verify(r => r.QueryAsync(workspaceId, 200, 0, null, false, null, sortBy, "asc"), Times.Once);
     }
 
     [Fact]
@@ -146,11 +195,11 @@ public class MetadataServiceTests
     public async Task GetColumnsAsync_MaxLimit_IsAccepted()
     {
         var workspaceId = Guid.NewGuid();
-        _projectionRepo.Setup(r => r.QueryAsync(workspaceId, 1000, 0, null, false, null, "column_name", "asc")).ReturnsAsync([]);
+        _projectionRepo.Setup(r => r.QueryAsync(workspaceId, 1000, 0, null, false, null, "columnName", "asc")).ReturnsAsync((new List<ColumnCatalogEditor>(), 0));
 
         await CreateService().GetColumnsAsync(workspaceId, new MetadataColumnsQuery(Limit: 1000));
 
-        _projectionRepo.Verify(r => r.QueryAsync(workspaceId, 1000, 0, null, false, null, "column_name", "asc"), Times.Once);
+        _projectionRepo.Verify(r => r.QueryAsync(workspaceId, 1000, 0, null, false, null, "columnName", "asc"), Times.Once);
     }
 
     // ── BulkUpdateAsync ──────────────────────────────────────────────────────

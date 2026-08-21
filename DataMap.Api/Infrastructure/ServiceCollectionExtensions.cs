@@ -9,6 +9,11 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddDataMapServices(this IServiceCollection services, IConfiguration config)
     {
+        // Generates the OpenAPI document from the .Produces/.WithName metadata on each route.
+        // It is the only machine-readable record of the contract; the frontend's types are
+        // hand-maintained and have nothing to check themselves against without it.
+        services.AddOpenApi();
+
         services.AddCors(options =>
         {
             options.AddDefaultPolicy(policy =>

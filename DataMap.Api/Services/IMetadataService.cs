@@ -4,8 +4,11 @@ namespace DataMap.Api.Services;
 
 public interface IMetadataService
 {
-    Task<List<ColumnGridRow>> GetColumnsAsync(Guid workspaceId, MetadataColumnsQuery query);
-    Task BulkUpdateAsync(Guid workspaceId, Guid participantId, List<ColumnUpdateRequest> updates);
+    Task<PagedResult<ColumnGridRow>> GetColumnsAsync(Guid workspaceId, MetadataColumnsQuery query);
+
+    /// <summary>Applies the edits and returns each affected column's new version.</summary>
+    Task<BulkUpdateResponse> BulkUpdateAsync(Guid workspaceId, Guid participantId, List<ColumnUpdateRequest> updates);
+
     Task<CoverageResponse> GetCoverageAsync(Guid workspaceId);
-    Task<List<string>> GetTableNamesAsync(Guid workspaceId);
+    Task<PagedResult<string>> GetTableNamesAsync(Guid workspaceId, PageQuery page);
 }

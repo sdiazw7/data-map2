@@ -1,5 +1,22 @@
 // API request and response types — populated per feature
 
+/** The envelope every list endpoint returns. */
+export type PagedResult<T> = {
+  items: T[]
+  /** Rows matching the query across all pages, ignoring limit and offset. */
+  total: number
+  limit: number
+  offset: number
+}
+
+/** The single error shape the API returns for every failure. */
+export type ApiErrorResponse = {
+  error: {
+    code: string
+    message: string
+  }
+}
+
 export type InviteDto = {
   id: string
   workspaceId: string
@@ -62,7 +79,25 @@ export type BusinessTermCreateRequest = {
   definition: string
 }
 
-export type TermMappingRequest = {
+/** Body of PUT /columns/{columnId}/business-term; the column comes from the route. */
+export type BusinessTermMappingRequest = {
   termId: string
+}
+
+/** A column's version after an edit — the token for the next optimistic write. */
+export type ColumnVersion = {
   columnId: string
+  version: number
+}
+
+export type BulkUpdateResponse = {
+  columns: ColumnVersion[]
+}
+
+export type ImportSummary = {
+  rows: number
+  schemas: number
+  tables: number
+  columnsCreated: number
+  columnsUpdated: number
 }

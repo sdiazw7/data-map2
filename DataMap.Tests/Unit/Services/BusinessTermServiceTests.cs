@@ -49,26 +49,29 @@ public class BusinessTermServiceTests
             new() { Id = id1, Name = "Customer", Definition = "A paying customer" },
             new() { Id = id2, Name = "Revenue",  Definition = "Income generated"   }
         };
-        _termRepo.Setup(r => r.GetAllAsync(workspaceId)).ReturnsAsync(terms);
+        _termRepo.Setup(r => r.GetAllAsync(workspaceId, It.IsAny<int>(), It.IsAny<int>())).ReturnsAsync((terms, 2));
 
-        var result = await CreateService().GetAllAsync(workspaceId);
+        var result = await CreateService().GetAllAsync(workspaceId, new PageQuery(200, 0));
 
-        Assert.Equal(2, result.Count);
-        Assert.Equal(id1, result[0].Id);
-        Assert.Equal("Customer", result[0].Name);
-        Assert.Equal("A paying customer", result[0].Definition);
-        Assert.Equal(id2, result[1].Id);
+        Assert.Equal(2, result.Items.Count);
+        Assert.Equal(2, result.Total);
+        Assert.Equal(id1, result.Items[0].Id);
+        Assert.Equal("Customer", result.Items[0].Name);
+        Assert.Equal("A paying customer", result.Items[0].Definition);
+        Assert.Equal(id2, result.Items[1].Id);
     }
 
     [Fact]
     public async Task GetAllAsync_EmptyWorkspace_ReturnsEmptyList()
     {
         var workspaceId = Guid.NewGuid();
-        _termRepo.Setup(r => r.GetAllAsync(workspaceId)).ReturnsAsync([]);
+        _termRepo.Setup(r => r.GetAllAsync(workspaceId, It.IsAny<int>(), It.IsAny<int>()))
+            .ReturnsAsync((new List<BusinessTerm>(), 0));
 
-        var result = await CreateService().GetAllAsync(workspaceId);
+        var result = await CreateService().GetAllAsync(workspaceId, new PageQuery(200, 0));
 
-        Assert.Empty(result);
+        Assert.Empty(result.Items);
+        Assert.Equal(0, result.Total);
     }
 
     // ── CreateAsync ──────────────────────────────────────────────────────────
@@ -184,7 +187,7 @@ public class BusinessTermServiceTests
         _termRepo.Setup(r => r.GetByIdAsync(termId)).ReturnsAsync(term);
         ColumnExists(workspaceId, columnId);
 
-        await CreateService().MapToColumnAsync(workspaceId, new TermMappingRequest(termId, columnId));
+        await CreateService().MapToColumnAsync(workspaceId, columnId, termId);
 
         _columnRepo.Verify(r => r.SetBusinessTermAsync(workspaceId, columnId, termId), Times.Once);
     }
@@ -199,7 +202,7 @@ public class BusinessTermServiceTests
         _termRepo.Setup(r => r.GetByIdAsync(termId)).ReturnsAsync(new BusinessTerm { Id = termId, WorkspaceId = workspaceId });
         ColumnExists(workspaceId, columnId);
 
-        await CreateService().MapToColumnAsync(workspaceId, new TermMappingRequest(termId, columnId));
+        await CreateService().MapToColumnAsync(workspaceId, columnId, termId);
 
         // A column holds at most one term, so remapping is a single overwrite, not an insert.
         _columnRepo.Verify(r => r.SetBusinessTermAsync(workspaceId, columnId, termId), Times.Once);
@@ -216,7 +219,7 @@ public class BusinessTermServiceTests
         _columnRepo.Setup(r => r.GetByIdAsync(workspaceId, columnId)).ReturnsAsync((Column?)null);
 
         await Assert.ThrowsAsync<ColumnNotFoundException>(() =>
-            CreateService().MapToColumnAsync(workspaceId, new TermMappingRequest(termId, columnId)));
+            CreateService().MapToColumnAsync(workspaceId, columnId, termId));
 
         _columnRepo.Verify(r => r.SetBusinessTermAsync(
             It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Guid?>()), Times.Never);
@@ -230,7 +233,7 @@ public class BusinessTermServiceTests
         _termRepo.Setup(r => r.GetByIdAsync(termId)).ReturnsAsync((BusinessTerm?)null);
 
         await Assert.ThrowsAsync<BusinessTermNotFoundException>(() =>
-            CreateService().MapToColumnAsync(workspaceId, new TermMappingRequest(termId, Guid.NewGuid())));
+            CreateService().MapToColumnAsync(workspaceId, Guid.NewGuid(), termId));
     }
 
     [Fact]
@@ -243,7 +246,7 @@ public class BusinessTermServiceTests
         _termRepo.Setup(r => r.GetByIdAsync(termId)).ReturnsAsync(term);
 
         await Assert.ThrowsAsync<BusinessTermNotFoundException>(() =>
-            CreateService().MapToColumnAsync(workspaceId, new TermMappingRequest(termId, Guid.NewGuid())));
+            CreateService().MapToColumnAsync(workspaceId, Guid.NewGuid(), termId));
     }
 
     [Fact]
@@ -257,7 +260,7 @@ public class BusinessTermServiceTests
         _termRepo.Setup(r => r.GetByIdAsync(termId)).ReturnsAsync(term);
         ColumnExists(workspaceId, columnId);
 
-        await CreateService().MapToColumnAsync(workspaceId, new TermMappingRequest(termId, columnId));
+        await CreateService().MapToColumnAsync(workspaceId, columnId, termId);
 
         _projectionService.Verify(p => p.SyncColumnTermAsync(workspaceId, columnId, "Revenue"), Times.Once);
         _projectionService.Verify(p => p.RefreshAsync(It.IsAny<Guid>()), Times.Never);
@@ -271,7 +274,7 @@ public class BusinessTermServiceTests
         _termRepo.Setup(r => r.GetByIdAsync(termId)).ReturnsAsync((BusinessTerm?)null);
 
         await Assert.ThrowsAsync<BusinessTermNotFoundException>(() =>
-            CreateService().MapToColumnAsync(workspaceId, new TermMappingRequest(termId, Guid.NewGuid())));
+            CreateService().MapToColumnAsync(workspaceId, Guid.NewGuid(), termId));
 
         _projectionService.Verify(p => p.RefreshAsync(It.IsAny<Guid>()), Times.Never);
         _projectionService.Verify(p => p.SyncColumnTermAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string?>()), Times.Never);

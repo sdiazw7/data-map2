@@ -1,47 +1,59 @@
-import type { ColumnGridRow, ColumnUpdateRequest, CoverageResponse } from '../types/api'
+import type {
+  BulkUpdateResponse,
+  ColumnGridRow,
+  ColumnUpdateRequest,
+  CoverageResponse,
+  ImportSummary,
+  PagedResult,
+} from '../types/api'
 import { apiFetch } from '../utils/api'
 
-export type SortField = 'column_name' | 'table_name' | 'data_type' | 'owner'
+/** Sort fields are the response field names, so one identifier does both jobs. */
+export type SortField = 'columnName' | 'tableName' | 'dataType' | 'owner'
 export type SortDir = 'asc' | 'desc'
 
 export type ColumnsQuery = {
   limit?: number
   offset?: number
   search?: string
-  undocumented_only?: boolean
-  table_name?: string
-  sort_by?: SortField
-  sort_dir?: SortDir
+  undocumentedOnly?: boolean
+  tableName?: string
+  sortBy?: SortField
+  sortDir?: SortDir
 }
 
-export async function getColumns(query: ColumnsQuery): Promise<ColumnGridRow[]> {
+export async function getColumns(query: ColumnsQuery): Promise<PagedResult<ColumnGridRow>> {
   const params = new URLSearchParams()
   if (query.limit !== undefined) params.set('limit', String(query.limit))
   if (query.offset !== undefined) params.set('offset', String(query.offset))
   if (query.search) params.set('search', query.search)
-  if (query.undocumented_only) params.set('undocumented_only', 'true')
-  if (query.table_name) params.set('table_name', query.table_name)
-  if (query.sort_by) params.set('sort_by', query.sort_by)
-  if (query.sort_dir) params.set('sort_dir', query.sort_dir)
-  return apiFetch<ColumnGridRow[]>(`/metadata/columns?${params}`)
+  if (query.undocumentedOnly) params.set('undocumentedOnly', 'true')
+  if (query.tableName) params.set('tableName', query.tableName)
+  if (query.sortBy) params.set('sortBy', query.sortBy)
+  if (query.sortDir) params.set('sortDir', query.sortDir)
+  return apiFetch<PagedResult<ColumnGridRow>>(`/columns?${params}`)
 }
 
-export async function getTableNames(): Promise<string[]> {
-  return apiFetch<string[]>('/metadata/tables')
+export async function getTableNames(limit = 500, offset = 0): Promise<PagedResult<string>> {
+  return apiFetch<PagedResult<string>>(`/tables?limit=${limit}&offset=${offset}`)
 }
 
-export async function bulkUpdateColumns(updates: ColumnUpdateRequest[]): Promise<void> {
-  return apiFetch<void>('/metadata/columns', {
+/** Returns each edited column's new version, so the caller need not refetch to keep writing. */
+export async function bulkUpdateColumns(updates: ColumnUpdateRequest[]): Promise<BulkUpdateResponse> {
+  return apiFetch<BulkUpdateResponse>('/columns', {
     method: 'PATCH',
     body: JSON.stringify(updates),
   })
 }
 
-export async function uploadCsv(file: File): Promise<void> {
+export async function importCsv(file: File): Promise<ImportSummary> {
   const BASE_URL = import.meta.env.VITE_API_BASE_URL
   const form = new FormData()
   form.append('file', file)
-  const res = await fetch(`${BASE_URL}/metadata/upload`, {
+
+  // Not routed through apiFetch: that sets a JSON content type, and the browser has to pick
+  // the multipart boundary itself.
+  const res = await fetch(`${BASE_URL}/imports`, {
     method: 'POST',
     credentials: 'include',
     body: form,
@@ -50,8 +62,9 @@ export async function uploadCsv(file: File): Promise<void> {
     const body = await res.json().catch(() => null)
     throw new Error(body?.error?.message ?? `Upload failed: ${res.status}`)
   }
+  return (await res.json()) as ImportSummary
 }
 
 export async function getCoverage(): Promise<CoverageResponse> {
-  return apiFetch<CoverageResponse>('/metadata/coverage')
+  return apiFetch<CoverageResponse>('/coverage')
 }

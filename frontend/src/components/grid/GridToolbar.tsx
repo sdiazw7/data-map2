@@ -8,6 +8,10 @@ type Props = {
   tableNames: string[]
   selectedTable: string
   onTableChange: (value: string) => void
+  /** Rows currently loaded in the grid. */
+  loadedCount: number
+  /** Rows matching the filters across all pages. */
+  totalCount: number
 }
 
 export default function GridToolbar({
@@ -18,6 +22,8 @@ export default function GridToolbar({
   tableNames,
   selectedTable,
   onTableChange,
+  loadedCount,
+  totalCount,
 }: Props) {
   const [searchInput, setSearchInput] = useState('')
 
@@ -57,6 +63,11 @@ export default function GridToolbar({
           </option>
         ))}
       </select>
+      <span className="text-sm text-gray-500 tabular-nums whitespace-nowrap">
+        {loadedCount < totalCount
+          ? `Showing ${loadedCount.toLocaleString()} of ${totalCount.toLocaleString()}`
+          : `${totalCount.toLocaleString()} ${totalCount === 1 ? 'column' : 'columns'}`}
+      </span>
       <div className="ml-auto flex items-center gap-2">
         <button
           type="button"

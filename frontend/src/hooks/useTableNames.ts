@@ -21,7 +21,7 @@ export function useTableNames(): UseTableNamesResult {
     setError(null)
 
     getTableNames()
-      .then(setTableNames)
+      .then(page => setTableNames(page.items))
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : 'Failed to load tables.')
       })

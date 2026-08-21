@@ -4,6 +4,6 @@ namespace DataMap.Api.Services;
 
 public interface IDevAccessService
 {
-    Task<List<WorkspaceSummaryDto>> ListWorkspacesAsync();
+    Task<PagedResult<WorkspaceSummaryDto>> ListWorkspacesAsync(PageQuery page);
     Task<JoinResult> JoinAsync(Guid workspaceId);
 }

@@ -1,9 +1,9 @@
+using DataMap.Api.Endpoints;
 using DataMap.Api.Middleware;
 using DataMap.Api.Models;
 using DataMap.Api.Repositories;
-using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Hosting;
 using Moq;
 using System.Text.Json;
 
@@ -12,21 +12,29 @@ namespace DataMap.Tests.Unit.Middleware;
 public class SessionAuthMiddlewareTests
 {
     private readonly Mock<ISessionRepository> _sessionRepo = new();
-    private readonly Mock<IWebHostEnvironment> _env = new();
 
-    public SessionAuthMiddlewareTests()
-    {
-        // Non-Development, so the /dev path bypass stays inert for these tests.
-        _env.SetupGet(e => e.EnvironmentName).Returns(Environments.Production);
-    }
+    /// <summary>A matched route that requires a session — the default for these tests.</summary>
+    private static Endpoint ProtectedEndpoint() =>
+        new(_ => Task.CompletedTask, new EndpointMetadataCollection(), "protected");
+
+    /// <summary>A matched route that opted out via AllowAnonymous.</summary>
+    private static Endpoint AnonymousEndpoint() =>
+        new(_ => Task.CompletedTask,
+            new EndpointMetadataCollection(new AllowAnonymousAttribute()),
+            "anonymous");
 
     private async Task<(int StatusCode, string Body, HttpContext Context, bool NextCalled)> InvokeAsync(
-        string path = "/metadata/columns",
-        string? cookieValue = null)
+        string? cookieValue = null,
+        Endpoint? endpoint = null,
+        bool useDefaultEndpoint = true)
     {
         var context = new DefaultHttpContext();
         context.Response.Body = new MemoryStream();
-        context.Request.Path = path;
+
+        if (endpoint is not null)
+            context.SetEndpoint(endpoint);
+        else if (useDefaultEndpoint)
+            context.SetEndpoint(ProtectedEndpoint());
 
         if (cookieValue is not null)
             context.Request.Headers["Cookie"] = $"participant_session={cookieValue}";
@@ -35,7 +43,7 @@ public class SessionAuthMiddlewareTests
         RequestDelegate next = _ => { nextCalled = true; return Task.CompletedTask; };
 
         var middleware = new SessionAuthMiddleware(next);
-        await middleware.InvokeAsync(context, _sessionRepo.Object, _env.Object);
+        await middleware.InvokeAsync(context, _sessionRepo.Object);
 
         context.Response.Body.Seek(0, SeekOrigin.Begin);
         var body = await new StreamReader(context.Response.Body).ReadToEndAsync();
@@ -53,20 +61,46 @@ public class SessionAuthMiddlewareTests
     private static string GetErrorCode(string body) =>
         JsonDocument.Parse(body).RootElement.GetProperty("error").GetProperty("code").GetString()!;
 
-    // ── Invite path bypass ───────────────────────────────────────────────────
+    // ── AllowAnonymous opt-out ───────────────────────────────────────────────
 
     [Fact]
-    public async Task InvokeAsync_InvitePath_SkipsAuthAndCallsNext()
+    public async Task InvokeAsync_AnonymousEndpoint_SkipsAuthAndCallsNext()
     {
-        var (status, _, _, nextCalled) = await InvokeAsync(path: "/invite/abc123");
+        var (status, _, _, nextCalled) = await InvokeAsync(endpoint: AnonymousEndpoint());
         Assert.Equal(200, status);
         Assert.True(nextCalled);
     }
 
     [Fact]
-    public async Task InvokeAsync_InviteJoinPath_SkipsAuth()
+    public async Task InvokeAsync_AnonymousEndpoint_DoesNotSetIdentityOnContext()
     {
-        var (_, _, _, nextCalled) = await InvokeAsync(path: "/invite/abc/join");
+        var (_, _, ctx, _) = await InvokeAsync(endpoint: AnonymousEndpoint());
+
+        Assert.False(ctx.Items.ContainsKey(RequestContext.ParticipantIdKey));
+        Assert.False(ctx.Items.ContainsKey(RequestContext.WorkspaceIdKey));
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ProtectedEndpointWithoutCookie_IsNotBypassed()
+    {
+        // The guard keys off route metadata rather than the request path, so nothing about a
+        // route's name can win it a bypass. That is what the old prefix rule could not promise.
+        var (status, _, _, nextCalled) = await InvokeAsync(endpoint: ProtectedEndpoint());
+
+        Assert.Equal(401, status);
+        Assert.False(nextCalled);
+    }
+
+    // ── Unmatched route ──────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task InvokeAsync_NoEndpointMatched_CallsNextSoRoutingCanAnswer404()
+    {
+        // Answering 401 here would let an unauthenticated caller tell a real route from a
+        // typo, mapping the API surface one guess at a time.
+        var (status, _, _, nextCalled) = await InvokeAsync(useDefaultEndpoint: false);
+
+        Assert.Equal(200, status);
         Assert.True(nextCalled);
     }
 
@@ -93,8 +127,10 @@ public class SessionAuthMiddlewareTests
 
         var (_, _, ctx, _) = await InvokeAsync(cookieValue: session.Id.ToString());
 
-        Assert.Equal(session.ParticipantId, ctx.Items["ParticipantId"]);
-        Assert.Equal(session.WorkspaceId, ctx.Items["WorkspaceId"]);
+        Assert.Equal(session.ParticipantId, ctx.Items[RequestContext.ParticipantIdKey]);
+        Assert.Equal(session.WorkspaceId, ctx.Items[RequestContext.WorkspaceIdKey]);
+        Assert.Equal(session.ParticipantId, ctx.ParticipantId());
+        Assert.Equal(session.WorkspaceId, ctx.WorkspaceId());
     }
 
     [Fact]
@@ -190,13 +226,8 @@ public class SessionAuthMiddlewareTests
     [Fact]
     public async Task InvokeAsync_Unauthorized_SetsContentTypeToJson()
     {
-        var context = new DefaultHttpContext();
-        context.Response.Body = new MemoryStream();
-        context.Request.Path = "/metadata/columns";
+        var (_, _, ctx, _) = await InvokeAsync(cookieValue: null);
 
-        var middleware = new SessionAuthMiddleware(_ => Task.CompletedTask);
-        await middleware.InvokeAsync(context, _sessionRepo.Object, _env.Object);
-
-        Assert.Equal("application/json", context.Response.ContentType);
+        Assert.Equal("application/json", ctx.Response.ContentType);
     }
 }

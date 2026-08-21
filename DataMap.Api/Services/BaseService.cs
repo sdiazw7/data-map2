@@ -25,6 +25,16 @@ public abstract class BaseService(ILogger logger)
         return trimmed;
     }
 
+    /// <summary>
+    /// Validates paging arguments against the caller's own ceiling. Every list endpoint bounds
+    /// its page, so the check lives here rather than being restated per service.
+    /// </summary>
+    protected static void RequirePaging(int limit, int offset, int maxLimit)
+    {
+        Require(limit >= 1 && limit <= maxLimit, $"limit must be between 1 and {maxLimit:N0}.");
+        Require(offset >= 0, "offset must be zero or greater.");
+    }
+
     /// <summary>Validates an optional free-text field, returning it trimmed, or null when blank.</summary>
     protected static string? OptionalText(string? value, string field, int maxLength)
     {

@@ -13,7 +13,7 @@ public class InviteEndpointTests(TestFixture fixture) : IClassFixture<TestFixtur
 {
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
-    // ── GET /invite/{token} ──────────────────────────────────────────────────
+    // ── GET /invites/{token} ──────────────────────────────────────────────────
 
     [Fact]
     public async Task GetInvite_ValidToken_Returns200WithInviteDto()
@@ -22,7 +22,7 @@ public class InviteEndpointTests(TestFixture fixture) : IClassFixture<TestFixtur
         fixture.InviteService.Setup(s => s.GetAsync("demo")).ReturnsAsync(inviteDto);
 
         var client = fixture.CreateClient();
-        var response = await client.GetAsync("/invite/demo");
+        var response = await client.GetAsync("/invites/demo");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var result = await response.Content.ReadFromJsonAsync<InviteDto>(JsonOpts);
@@ -37,7 +37,7 @@ public class InviteEndpointTests(TestFixture fixture) : IClassFixture<TestFixtur
         fixture.InviteService.Setup(s => s.GetAsync("bad-token")).ThrowsAsync(new InviteNotFoundException());
 
         var client = fixture.CreateClient();
-        var response = await client.GetAsync("/invite/bad-token");
+        var response = await client.GetAsync("/invites/bad-token");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         AssertErrorCode(await response.Content.ReadAsStringAsync(), "INVITE_NOT_FOUND");
@@ -50,14 +50,14 @@ public class InviteEndpointTests(TestFixture fixture) : IClassFixture<TestFixtur
         fixture.InviteService.Setup(s => s.GetAsync("expired")).ReturnsAsync(inviteDto);
 
         var client = fixture.CreateClient();
-        var response = await client.GetAsync("/invite/expired");
+        var response = await client.GetAsync("/invites/expired");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var result = await response.Content.ReadFromJsonAsync<InviteDto>(JsonOpts);
         Assert.False(result!.IsValid);
     }
 
-    // ── POST /invite/{token}/join ────────────────────────────────────────────
+    // ── POST /invites/{token}/join ────────────────────────────────────────────
 
     [Fact]
     public async Task JoinInvite_ValidRequest_Returns200WithJoinResponse()
@@ -67,7 +67,7 @@ public class InviteEndpointTests(TestFixture fixture) : IClassFixture<TestFixtur
             .ReturnsAsync(new JoinResult(joinResponse, Guid.NewGuid()));
 
         var client = fixture.CreateClient();
-        var response = await client.PostAsJsonAsync("/invite/demo/join", new { email = "user@example.com" });
+        var response = await client.PostAsJsonAsync("/invites/demo/join", new { email = "user@example.com" });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var result = await response.Content.ReadFromJsonAsync<JoinResponse>(JsonOpts);
@@ -82,7 +82,7 @@ public class InviteEndpointTests(TestFixture fixture) : IClassFixture<TestFixtur
             .ThrowsAsync(new InviteNotFoundException());
 
         var client = fixture.CreateClient();
-        var response = await client.PostAsJsonAsync("/invite/missing/join", new { email = "user@example.com" });
+        var response = await client.PostAsJsonAsync("/invites/missing/join", new { email = "user@example.com" });
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -94,7 +94,7 @@ public class InviteEndpointTests(TestFixture fixture) : IClassFixture<TestFixtur
             .ThrowsAsync(new InviteExpiredException());
 
         var client = fixture.CreateClient();
-        var response = await client.PostAsJsonAsync("/invite/expired/join", new { email = "user@example.com" });
+        var response = await client.PostAsJsonAsync("/invites/expired/join", new { email = "user@example.com" });
 
         Assert.Equal(HttpStatusCode.Gone, response.StatusCode);
         AssertErrorCode(await response.Content.ReadAsStringAsync(), "INVITE_EXPIRED");
@@ -107,7 +107,7 @@ public class InviteEndpointTests(TestFixture fixture) : IClassFixture<TestFixtur
             .ThrowsAsync(new InviteUsageExceededException());
 
         var client = fixture.CreateClient();
-        var response = await client.PostAsJsonAsync("/invite/full/join", new { email = "user@example.com" });
+        var response = await client.PostAsJsonAsync("/invites/full/join", new { email = "user@example.com" });
 
         Assert.Equal(HttpStatusCode.Gone, response.StatusCode);
         AssertErrorCode(await response.Content.ReadAsStringAsync(), "INVITE_USAGE_EXCEEDED");
@@ -120,7 +120,7 @@ public class InviteEndpointTests(TestFixture fixture) : IClassFixture<TestFixtur
             .ThrowsAsync(new ValidationException("Email is required."));
 
         var client = fixture.CreateClient();
-        var response = await client.PostAsJsonAsync("/invite/demo/join", new { email = "" });
+        var response = await client.PostAsJsonAsync("/invites/demo/join", new { email = "" });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         AssertErrorCode(await response.Content.ReadAsStringAsync(), "VALIDATION_ERROR");

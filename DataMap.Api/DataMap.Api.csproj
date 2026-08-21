@@ -13,6 +13,11 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.3" />
+    <!-- Pinned above the 2.0.0 that Microsoft.AspNetCore.OpenApi 10.0.3 resolves, which carries
+         the GHSA-v5pm-xwqc-g5wc advisory (first clean release is 2.8.0). Drop this pin once
+         Microsoft.AspNetCore.OpenApi resolves a patched version on its own. -->
+    <PackageReference Include="Microsoft.OpenApi" Version="2.8.0" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
   </ItemGroup>
 

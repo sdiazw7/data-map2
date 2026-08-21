@@ -26,8 +26,17 @@ public class WorkspaceRepository(AppDbContext db) : IWorkspaceRepository
             .FirstOrDefaultAsync();
     }
 
-    public async Task<List<Workspace>> GetAllAsync()
+    public async Task<(List<Workspace> Workspaces, int Total)> GetAllAsync(int limit, int offset)
     {
-        return await db.Workspaces.OrderBy(w => w.Name).ToListAsync();
+        var total = await db.Workspaces.CountAsync();
+
+        var workspaces = await db.Workspaces
+            .OrderBy(w => w.Name)
+            .ThenBy(w => w.Id)
+            .Skip(offset)
+            .Take(limit)
+            .ToListAsync();
+
+        return (workspaces, total);
     }
 }

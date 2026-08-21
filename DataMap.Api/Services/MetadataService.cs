@@ -19,11 +19,14 @@ public class MetadataService(
     IUnitOfWork unitOfWork,
     ILogger<MetadataService> logger) : BaseService(logger), IMetadataService
 {
-    private static readonly HashSet<string> SortableColumns = ["column_name", "table_name", "data_type", "owner"];
+    private static readonly HashSet<string> SortableColumns = ["columnName", "tableName", "dataType", "owner"];
 
     // Paging bounds. A workspace holds 100k+ columns, so an unbounded limit would read the
     // whole catalog into memory and defeat the point of paginating at all.
     private const int MaxLimit = 1000;
+
+    // Table names are one row per distinct table, so the ceiling is lower than the grid's.
+    private const int MaxTableNameLimit = 5_000;
 
     // Bulk edit bounds. The grid pastes in chunks; this caps one request, not one session.
     private const int MaxBulkUpdateRows = 5_000;
@@ -31,15 +34,14 @@ public class MetadataService(
     private const int MaxExampleValueLength = 1_000;
     private const int MaxOwnerLength = 200;
 
-    public async Task<List<ColumnGridRow>> GetColumnsAsync(Guid workspaceId, MetadataColumnsQuery query)
+    public async Task<PagedResult<ColumnGridRow>> GetColumnsAsync(Guid workspaceId, MetadataColumnsQuery query)
     {
         Require(SortableColumns.Contains(query.SortBy),
             $"'{query.SortBy}' is not a sortable field. Allowed values: {string.Join(", ", SortableColumns)}.");
-        Require(query.SortDir is "asc" or "desc", "sort_dir must be 'asc' or 'desc'.");
-        Require(query.Limit >= 1 && query.Limit <= MaxLimit, $"limit must be between 1 and {MaxLimit}.");
-        Require(query.Offset >= 0, "offset must be zero or greater.");
+        Require(query.SortDir is "asc" or "desc", "sortDir must be 'asc' or 'desc'.");
+        RequirePaging(query.Limit, query.Offset, MaxLimit);
 
-        var rows = await projectionRepo.QueryAsync(
+        var (rows, total) = await projectionRepo.QueryAsync(
             workspaceId,
             query.Limit,
             query.Offset,
@@ -49,7 +51,7 @@ public class MetadataService(
             query.SortBy,
             query.SortDir);
 
-        return rows.Select(r => new ColumnGridRow(
+        var items = rows.Select(r => new ColumnGridRow(
             r.ColumnId,
             r.SchemaName,
             r.TableName,
@@ -61,9 +63,11 @@ public class MetadataService(
             r.Owner,
             r.Version
         )).ToList();
+
+        return new PagedResult<ColumnGridRow>(items, total, query.Limit, query.Offset);
     }
 
-    public async Task BulkUpdateAsync(Guid workspaceId, Guid participantId, List<ColumnUpdateRequest> updates)
+    public async Task<BulkUpdateResponse> BulkUpdateAsync(Guid workspaceId, Guid participantId, List<ColumnUpdateRequest> updates)
     {
         ValidateUpdates(updates);
 
@@ -117,6 +121,10 @@ public class MetadataService(
             // a full delete + reinsert of the workspace on every keystroke-level edit.
             await projectionService.SyncColumnsAsync(workspaceId, edited);
         });
+
+        // Read after the commit: these are the versions a caller must send with its next edit.
+        return new BulkUpdateResponse(
+            edited.Select(c => new ColumnVersionDto(c.Id, c.Version)).ToList());
     }
 
     public async Task<CoverageResponse> GetCoverageAsync(Guid workspaceId)
@@ -126,9 +134,14 @@ public class MetadataService(
         return new CoverageResponse(total, documented, percent);
     }
 
-    public async Task<List<string>> GetTableNamesAsync(Guid workspaceId)
+    public async Task<PagedResult<string>> GetTableNamesAsync(Guid workspaceId, PageQuery page)
     {
-        return await projectionRepo.GetDistinctTableNamesAsync(workspaceId);
+        RequirePaging(page.Limit, page.Offset, MaxTableNameLimit);
+
+        var (names, total) = await projectionRepo.GetDistinctTableNamesAsync(
+            workspaceId, page.Limit, page.Offset);
+
+        return new PagedResult<string>(names, total, page.Limit, page.Offset);
     }
 
     /// <summary>Copies the request onto the column, returning an audit record per changed field.</summary>

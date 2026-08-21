@@ -17,7 +17,7 @@ export function useDevWorkspaces(): {
     setError(null)
 
     getDevWorkspaces()
-      .then(setWorkspaces)
+      .then(page => setWorkspaces(page.items))
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : 'Failed to load workspaces.')
       })

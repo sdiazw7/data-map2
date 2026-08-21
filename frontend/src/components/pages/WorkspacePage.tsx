@@ -5,7 +5,7 @@ import { useMetadataColumns } from '../../hooks/useMetadataColumns'
 import { useBusinessTerms } from '../../hooks/useBusinessTerms'
 import { useTableNames } from '../../hooks/useTableNames'
 import { useBulkUpdate } from '../../hooks/useBulkUpdate'
-import { mapTermToColumn } from '../../services/businessTermService'
+import { setColumnBusinessTerm, clearColumnBusinessTerm } from '../../services/businessTermService'
 import type { SortField, SortDir } from '../../services/metadataService'
 import type { ColumnUpdateRequest } from '../../types/api'
 import CoverageBanner from '../coverage/CoverageBanner'
@@ -22,19 +22,20 @@ export default function WorkspacePage() {
   const [search, setSearch] = useState('')
   const [undocumentedOnly, setUndocumentedOnly] = useState(false)
   const [tableName, setTableName] = useState('')
-  const [sortBy, setSortBy] = useState<SortField>('column_name')
+  const [sortBy, setSortBy] = useState<SortField>('columnName')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [uploadOpen, setUploadOpen] = useState(false)
   const [termsOpen, setTermsOpen] = useState(false)
 
   const { coverage, reload: reloadCoverage } = useCoverage()
-  const { columns, isLoading, error, reload: reloadColumns } = useMetadataColumns({
-    search,
-    undocumented_only: undocumentedOnly,
-    table_name: tableName || undefined,
-    sort_by: sortBy,
-    sort_dir: sortDir,
-  })
+  const { columns, total, isLoading, error, reload: reloadColumns, applyUpdate, applyTerm } =
+    useMetadataColumns({
+      search,
+      undocumentedOnly,
+      tableName: tableName || undefined,
+      sortBy,
+      sortDir,
+    })
   const { terms, isLoading: termsLoading, error: termsError, create: createTerm } = useBusinessTerms()
   const { tableNames, reload: reloadTableNames } = useTableNames()
   const { mutate } = useBulkUpdate()
@@ -48,14 +49,24 @@ export default function WorkspacePage() {
   }, [tableNames])
 
   async function handleUpdate(update: ColumnUpdateRequest) {
-    await mutate([update])
-    reloadColumns()
+    const result = await mutate([update])
+
+    // The response carries the new versions, so the edited row is reconciled in place rather
+    // than refetching the page. Coverage is a server-side aggregate and still has to be reread.
+    applyUpdate(update, result.columns)
     reloadCoverage()
   }
 
   async function handleTermMap(columnId: string, termId: string) {
-    await mapTermToColumn({ termId, columnId })
-    reloadColumns()
+    // The empty option in the term cell means "no term", which is a delete, not a mapping.
+    if (termId) {
+      await setColumnBusinessTerm(columnId, termId)
+      applyTerm(columnId, terms.find(t => t.id === termId)?.name ?? null)
+    } else {
+      await clearColumnBusinessTerm(columnId)
+      applyTerm(columnId, null)
+    }
+
     reloadCoverage()
   }
 
@@ -93,6 +104,8 @@ export default function WorkspacePage() {
           tableNames={tableNames}
           selectedTable={tableName}
           onTableChange={setTableName}
+          loadedCount={columns.length}
+          totalCount={total}
         />
       </div>
 

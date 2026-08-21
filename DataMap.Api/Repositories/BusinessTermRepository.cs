@@ -6,12 +6,20 @@ namespace DataMap.Api.Repositories;
 
 public class BusinessTermRepository(AppDbContext db) : IBusinessTermRepository
 {
-    public async Task<List<BusinessTerm>> GetAllAsync(Guid workspaceId)
+    public async Task<(List<BusinessTerm> Terms, int Total)> GetAllAsync(Guid workspaceId, int limit, int offset)
     {
-        return await db.BusinessTerms
-            .Where(t => t.WorkspaceId == workspaceId)
+        var query = db.BusinessTerms.Where(t => t.WorkspaceId == workspaceId);
+
+        var total = await query.CountAsync();
+
+        var terms = await query
             .OrderBy(t => t.Name)
+            .ThenBy(t => t.Id)
+            .Skip(offset)
+            .Take(limit)
             .ToListAsync();
+
+        return (terms, total);
     }
 
     public async Task<BusinessTerm?> GetByIdAsync(Guid termId)

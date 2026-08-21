@@ -2,6 +2,7 @@ using System.Globalization;
 using CsvHelper;
 using CsvHelper.Configuration.Attributes;
 using DataMap.Api.Data;
+using DataMap.Api.DTOs;
 using DataMap.Api.Exceptions;
 using DataMap.Api.Repositories;
 using Microsoft.Extensions.Logging;

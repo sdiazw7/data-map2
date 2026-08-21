@@ -19,7 +19,7 @@ export function useBusinessTerms(): UseBusinessTermsResult {
     setError(null)
 
     getBusinessTerms()
-      .then(setTerms)
+      .then(page => setTerms(page.items))
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : 'Failed to load business terms.')
       })

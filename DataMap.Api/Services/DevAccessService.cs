@@ -17,12 +17,17 @@ public class DevAccessService(
     IUnitOfWork unitOfWork,
     ILogger<DevAccessService> logger) : BaseService(logger), IDevAccessService
 {
+    private const int MaxLimit = 500;
     private const string DevEmail = "dev@local";
 
-    public async Task<List<WorkspaceSummaryDto>> ListWorkspacesAsync()
+    public async Task<PagedResult<WorkspaceSummaryDto>> ListWorkspacesAsync(PageQuery page)
     {
-        var workspaces = await workspaceRepo.GetAllAsync();
-        return workspaces.Select(w => new WorkspaceSummaryDto(w.Id, w.Name)).ToList();
+        RequirePaging(page.Limit, page.Offset, MaxLimit);
+
+        var (workspaces, total) = await workspaceRepo.GetAllAsync(page.Limit, page.Offset);
+
+        var items = workspaces.Select(w => new WorkspaceSummaryDto(w.Id, w.Name)).ToList();
+        return new PagedResult<WorkspaceSummaryDto>(items, total, page.Limit, page.Offset);
     }
 
     public async Task<JoinResult> JoinAsync(Guid workspaceId)

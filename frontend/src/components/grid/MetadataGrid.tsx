@@ -47,15 +47,15 @@ export default function MetadataGrid({ columns: rows, terms, onUpdate, onTermMap
       cell: info => info.getValue() ?? '',
     }),
     columnHelper.accessor('tableName', {
-      header: () => sortableHeader('Table', 'table_name'),
+      header: () => sortableHeader('Table', 'tableName'),
       cell: info => info.getValue() ?? '',
     }),
     columnHelper.accessor('columnName', {
-      header: () => sortableHeader('Column', 'column_name'),
+      header: () => sortableHeader('Column', 'columnName'),
       cell: info => info.getValue() ?? '',
     }),
     columnHelper.accessor('dataType', {
-      header: () => sortableHeader('Type', 'data_type'),
+      header: () => sortableHeader('Type', 'dataType'),
       cell: info => info.getValue() ?? '',
     }),
     columnHelper.display({
