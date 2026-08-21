@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
+import type { Row } from '@tanstack/react-table'
 import {
   createColumnHelper,
   flexRender,
@@ -7,8 +8,10 @@ import {
 } from '@tanstack/react-table'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { ColumnGridRow, BusinessTermDto } from '../../types/api'
-import type { ColumnEdit } from '../../hooks/useMetadataColumns'
+import type { ColumnEdit, ColumnEdits, EditableField } from '../../utils/columnFields'
 import type { SortField, SortDir } from '../../services/metadataService'
+import { useGridSelection } from '../../hooks/useGridSelection'
+import { buildPasteEdits, parseClipboardGrid } from '../../utils/clipboard'
 import GridCell from './GridCell'
 import BusinessTermCell from './BusinessTermCell'
 
@@ -22,6 +25,11 @@ type Props = {
   onLoadMore: () => void
   isLoadingMore: boolean
   onTermMap: (columnId: string, termId: string) => void
+  /**
+   * A pasted range, already laid over the loaded rows. `skippedRows` counts the pasted rows
+   * that fell past the end of the window and so had nowhere to go.
+   */
+  onPasteEdits: (edits: ColumnEdits, skippedRows: number) => void
   sortBy: SortField
   sortDir: SortDir
   onSortChange: (field: SortField) => void
@@ -40,6 +48,7 @@ export default function MetadataGrid({
   terms,
   onEdit,
   onTermMap,
+  onPasteEdits,
   total,
   onLoadMore,
   isLoadingMore,
@@ -49,11 +58,12 @@ export default function MetadataGrid({
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
 
-  // Memoised because the table reads it by identity: a fresh array each render made TanStack
-  // rebuild every column definition, which in turn threw away the per-row cell memos for the
-  // rows on screen. This is the measurable case the performance rule leaves room for, not a
-  // preemptive one — it only holds if the handlers below stay stable too, which is why
-  // WorkspacePage wraps them.
+  const { active, isEditing, editSeed, activate, startEdit, stopEdit, handleKeyDown } =
+    useGridSelection({ rowCount: rows.length })
+
+  // Rebuilt when the selection moves, which is bounded by the viewport: TanStack keys its row
+  // model on `data`, so moving the cursor re-renders the cells on screen but does not walk the
+  // window the way an edit does.
   const tableColumns = useMemo(() => {
     function sortableHeader(label: string, field: SortField) {
       const isActive = sortBy === field
@@ -67,6 +77,34 @@ export default function MetadataGrid({
           {label}
           {isActive && <span aria-hidden="true">{sortDir === 'asc' ? '▲' : '▼'}</span>}
         </button>
+      )
+    }
+
+    function editableCell(field: EditableField, row: Row<ColumnGridRow>) {
+      const isActiveCell = active?.rowIndex === row.index && active.field === field
+
+      return (
+        <GridCell
+          value={row.original[field]}
+          isActive={isActiveCell}
+          isEditing={isActiveCell && isEditing}
+          editSeed={editSeed}
+          onActivate={() => activate({ rowIndex: row.index, field })}
+          onStartEdit={() => {
+            activate({ rowIndex: row.index, field })
+            startEdit()
+          }}
+          onCommit={(value, move) => {
+            // Assigned rather than built from a computed key, which would widen the type to a
+            // string index signature and lose the field names.
+            const edit: ColumnEdit = {}
+            edit[field] = value === '' ? null : value
+
+            onEdit(row.original.columnId, edit)
+            stopEdit(move)
+          }}
+          onCancel={move => stopEdit(move)}
+        />
       )
     }
 
@@ -90,32 +128,17 @@ export default function MetadataGrid({
       columnHelper.display({
         id: 'description',
         header: 'Description',
-        cell: ({ row }) => (
-          <GridCell
-            value={row.original.description}
-            onChange={val => onEdit(row.original.columnId, { description: val || null })}
-          />
-        ),
+        cell: ({ row }) => editableCell('description', row),
       }),
       columnHelper.display({
         id: 'exampleValue',
         header: 'Example',
-        cell: ({ row }) => (
-          <GridCell
-            value={row.original.exampleValue}
-            onChange={val => onEdit(row.original.columnId, { exampleValue: val || null })}
-          />
-        ),
+        cell: ({ row }) => editableCell('exampleValue', row),
       }),
       columnHelper.display({
         id: 'owner',
         header: () => sortableHeader('Owner', 'owner'),
-        cell: ({ row }) => (
-          <GridCell
-            value={row.original.owner}
-            onChange={val => onEdit(row.original.columnId, { owner: val || null })}
-          />
-        ),
+        cell: ({ row }) => editableCell('owner', row),
       }),
       columnHelper.display({
         id: 'businessTerm',
@@ -129,7 +152,20 @@ export default function MetadataGrid({
         ),
       }),
     ]
-  }, [terms, onEdit, onTermMap, sortBy, sortDir, onSortChange])
+  }, [
+    terms,
+    onEdit,
+    onTermMap,
+    sortBy,
+    sortDir,
+    onSortChange,
+    active,
+    isEditing,
+    editSeed,
+    activate,
+    startEdit,
+    stopEdit,
+  ])
 
   const table = useReactTable({
     data: rows,
@@ -166,6 +202,37 @@ export default function MetadataGrid({
     if (lastVisibleIndex >= rows.length - LOAD_MORE_THRESHOLD) onLoadMore()
   }, [lastVisibleIndex, rows.length, total, onLoadMore])
 
+  // Arrowing past the edge of the viewport has to bring the row with it — under virtualization
+  // the row the selection moved to may not be mounted at all.
+  useEffect(() => {
+    if (active) virtualizer.scrollToIndex(active.rowIndex, { align: 'auto' })
+    // The virtualizer is a fresh object each render; following the row is what matters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active?.rowIndex])
+
+  // The editor takes focus while it is open, and the grid needs it back afterwards or the next
+  // arrow key goes to the document. preventScroll because the scroll position is the
+  // virtualizer's to decide.
+  useEffect(() => {
+    if (active && !isEditing) containerRef.current?.focus({ preventScroll: true })
+  }, [active, isEditing])
+
+  function handlePaste(event: React.ClipboardEvent) {
+    // With the editor open this is an ordinary paste into a text box.
+    if (!active || isEditing) return
+
+    const text = event.clipboardData.getData('text/plain')
+    if (!text) return
+
+    const grid = parseClipboardGrid(text)
+    if (grid.length === 0) return
+
+    event.preventDefault()
+
+    const { edits, skippedRows } = buildPasteEdits(rows, active, grid)
+    onPasteEdits(edits, skippedRows)
+  }
+
   if (rows.length === 0) {
     return (
       <div className="flex items-center justify-center h-full text-gray-500 text-sm">
@@ -175,11 +242,20 @@ export default function MetadataGrid({
   }
 
   return (
-    <div ref={containerRef} className="overflow-auto h-full">
-      <table className="w-full text-sm border-collapse">
+    <div
+      ref={containerRef}
+      tabIndex={0}
+      onKeyDown={event => {
+        // Tab included: the grid moves between cells rather than letting focus leave it.
+        if (handleKeyDown(event)) event.preventDefault()
+      }}
+      onPaste={handlePaste}
+      className="overflow-auto h-full outline-none"
+    >
+      <table role="grid" aria-rowcount={total} className="w-full text-sm border-collapse">
         <thead className="sticky top-0 bg-gray-50 z-10">
           {table.getHeaderGroups().map(headerGroup => (
-            <tr key={headerGroup.id}>
+            <tr key={headerGroup.id} role="row">
               {headerGroup.headers.map(header => (
                 <th
                   key={header.id}
@@ -193,7 +269,7 @@ export default function MetadataGrid({
         </thead>
         <tbody>
           {paddingTop > 0 && (
-            <tr>
+            <tr role="presentation">
               <td style={{ height: `${paddingTop}px` }} colSpan={tableColumns.length} />
             </tr>
           )}
@@ -202,11 +278,20 @@ export default function MetadataGrid({
             return (
               <tr
                 key={row.id}
+                role="row"
+                aria-rowindex={virtualRow.index + 1}
                 className="border-b border-gray-100 hover:bg-gray-50"
                 style={{ height: `${virtualRow.size}px` }}
               >
                 {row.getVisibleCells().map(cell => (
-                  <td key={cell.id} className="px-3 py-1 align-middle">
+                  <td
+                    key={cell.id}
+                    role="gridcell"
+                    aria-selected={
+                      active?.rowIndex === virtualRow.index && active.field === cell.column.id
+                    }
+                    className="px-3 py-1 align-middle"
+                  >
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                   </td>
                 ))}
@@ -214,7 +299,7 @@ export default function MetadataGrid({
             )
           })}
           {paddingBottom > 0 && (
-            <tr>
+            <tr role="presentation">
               <td style={{ height: `${paddingBottom}px` }} colSpan={tableColumns.length} />
             </tr>
           )}

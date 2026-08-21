@@ -250,6 +250,50 @@ describe('useMetadataColumns write queue', () => {
     )
   })
 
+  it('sends a pasted range as one request', async () => {
+    const { result } = await renderLoaded()
+
+    act(() => {
+      void ignore(
+        result.current.editColumns([
+          { columnId: 'c1', edit: { description: 'A', owner: 'ana' } },
+          { columnId: 'c2', edit: { description: 'B' } },
+        ]),
+      )
+    })
+
+    await waitFor(() => expect(writes).toHaveLength(1))
+    expect(writes[0].requests).toHaveLength(2)
+    expect(writes[0].requests[0]).toMatchObject({
+      columnId: 'c1',
+      description: 'A',
+      owner: 'ana',
+      version: 1,
+    })
+    expect(writes[0].requests[1]).toMatchObject({ columnId: 'c2', description: 'B' })
+
+    // And every pasted cell is on screen before the server has said anything.
+    expect(result.current.columns[0].description).toBe('A')
+    expect(result.current.columns[0].owner).toBe('ana')
+    expect(result.current.columns[1].description).toBe('B')
+  })
+
+  it('ignores pasted rows that are no longer in the window', async () => {
+    const { result } = await renderLoaded()
+
+    act(() => {
+      void ignore(
+        result.current.editColumns([
+          { columnId: 'c1', edit: { description: 'A' } },
+          { columnId: 'gone', edit: { description: 'B' } },
+        ]),
+      )
+    })
+
+    await waitFor(() => expect(writes).toHaveLength(1))
+    expect(writes[0].requests.map(r => r.columnId)).toEqual(['c1'])
+  })
+
   it('reconciles a whole batch in one pass over the window', async () => {
     const { result } = await renderLoaded()
     const before = result.current.columns

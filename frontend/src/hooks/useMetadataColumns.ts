@@ -3,17 +3,8 @@ import type { ColumnGridRow, ColumnUpdateRequest } from '../types/api'
 import type { ColumnsQuery } from '../services/metadataService'
 import { getColumns, bulkUpdateColumns } from '../services/metadataService'
 import { ApiError, ApiErrorCode } from '../utils/api'
-
-/** The editable fields of a row. A cell sends only the one it changed. */
-export type ColumnEdit = Partial<Pick<ColumnGridRow, 'description' | 'exampleValue' | 'owner'>>
-
-const EDITABLE_FIELDS = ['description', 'exampleValue', 'owner'] as const
-
-type EditableField = (typeof EDITABLE_FIELDS)[number]
-
-function touchedFields(edit: ColumnEdit): EditableField[] {
-  return EDITABLE_FIELDS.filter(field => field in edit)
-}
+import type { ColumnEdit, ColumnEdits } from '../utils/columnFields'
+import { touchedFields } from '../utils/columnFields'
 
 /**
  * What a caller sees when the server declined its row as stale. The batch itself succeeded, so
@@ -72,6 +63,11 @@ type UseMetadataColumnsResult = {
    * {@link ApiError} if the write failed, having already put the row back as it was.
    */
   editColumn: (columnId: string, edit: ColumnEdit) => Promise<void>
+  /**
+   * The same for a set of rows at once — what a pasted range uses. Every edit lands in one
+   * request; the promise rejects with the first failure once all of them have settled.
+   */
+  editColumns: (edits: ColumnEdits) => Promise<void>
   /**
    * Sets a row's business term locally, returning the term it replaced so a failed write can
    * undo it. Called again with the version the server returned once the write has landed.
@@ -340,40 +336,72 @@ export function useMetadataColumns(query: ColumnsQuery): UseMetadataColumnsResul
 
   flushRef.current = () => void flush()
 
-  const editColumn = useCallback(
-    (columnId: string, edit: ColumnEdit): Promise<void> => {
-      const row = rowsRef.current.find(r => r.columnId === columnId)
-      if (!row) return Promise.resolve()
+  /**
+   * Puts one row's edit on the queue and hands back the promise for it. Does not patch the row
+   * or schedule the flush — the caller does both once for the whole set, so a pasted range
+   * costs one pass over the window rather than one per cell.
+   */
+  const queueEdit = useCallback((row: ColumnGridRow, edit: ColumnEdit): Promise<void> => {
+    const columnId = row.columnId
+    const queued = pendingRef.current.get(columnId)
+    const write: PendingWrite = queued ?? { before: {}, snapshot: row, resolvers: [] }
 
-      // Optimistic: the cell shows the new value now. The queue either confirms it or takes it
-      // back.
-      patchRow(columnId, edit)
+    for (const field of touchedFields(edit)) {
+      if (field in write.before) continue
 
-      const queued = pendingRef.current.get(columnId)
-      const write: PendingWrite = queued ?? { before: {}, snapshot: row, resolvers: [] }
+      // What to restore is the last value the server confirmed. While a write for this row is
+      // in flight the row on screen holds values it has not confirmed yet, so the baseline
+      // comes from that write instead — otherwise a second failure would restore a value the
+      // first one had already rolled back.
+      const inFlight = inFlightRef.current.get(columnId)
+      write.before[field] =
+        inFlight && field in inFlight.before ? inFlight.before[field] : row[field]
+    }
 
-      for (const field of touchedFields(edit)) {
-        if (field in write.before) continue
+    write.snapshot = { ...write.snapshot, ...edit }
 
-        // What to restore is the last value the server confirmed. While a write for this row is
-        // in flight the row on screen holds values it has not confirmed yet, so the baseline
-        // comes from that write instead — otherwise a second failure would restore a value the
-        // first one had already rolled back.
-        const inFlight = inFlightRef.current.get(columnId)
-        write.before[field] =
-          inFlight && field in inFlight.before ? inFlight.before[field] : row[field]
+    if (!queued) pendingRef.current.set(columnId, write)
+
+    return new Promise<void>((resolve, reject) => {
+      write.resolvers.push({ resolve, reject })
+    })
+  }, [])
+
+  const editColumns = useCallback(
+    (edits: ColumnEdits): Promise<void> => {
+      if (edits.length === 0) return Promise.resolve()
+
+      // One index of the window for the whole set. Looking each row up by scanning would put a
+      // pass over 100k rows on every cell of a pasted range.
+      const rowsById = new Map(rowsRef.current.map(row => [row.columnId, row]))
+
+      const patches = new Map<string, Partial<ColumnGridRow>>()
+      const settled: Promise<void>[] = []
+
+      for (const { columnId, edit } of edits) {
+        const row = rowsById.get(columnId)
+        if (!row) continue
+
+        // Two cells of the same row arrive as two edits; they belong to one patch and one write.
+        patches.set(columnId, { ...patches.get(columnId), ...edit })
+        settled.push(queueEdit(row, edit))
       }
 
-      write.snapshot = { ...row, ...edit }
+      if (settled.length === 0) return Promise.resolve()
 
-      if (!queued) pendingRef.current.set(columnId, write)
+      // Optimistic: the cells show their new values now. The queue either confirms them or
+      // takes them back.
+      patchRows(patches)
       scheduleFlush()
 
-      return new Promise<void>((resolve, reject) => {
-        write.resolvers.push({ resolve, reject })
-      })
+      return Promise.all(settled).then(() => undefined)
     },
-    [patchRow, scheduleFlush],
+    [patchRows, queueEdit, scheduleFlush],
+  )
+
+  const editColumn = useCallback(
+    (columnId: string, edit: ColumnEdit) => editColumns([{ columnId, edit }]),
+    [editColumns],
   )
 
   const applyTerm = useCallback(
@@ -433,6 +461,7 @@ export function useMetadataColumns(query: ColumnsQuery): UseMetadataColumnsResul
     loadMore,
     reload,
     editColumn,
+    editColumns,
     applyTerm,
   }
 }

@@ -4,7 +4,7 @@ import { useCoverage } from '../../hooks/useCoverage'
 import { useMetadataColumns } from '../../hooks/useMetadataColumns'
 import { useBusinessTerms } from '../../hooks/useBusinessTerms'
 import { useTableNames } from '../../hooks/useTableNames'
-import type { ColumnEdit } from '../../hooks/useMetadataColumns'
+import type { ColumnEdit, ColumnEdits } from '../../utils/columnFields'
 import { setColumnBusinessTerm, clearColumnBusinessTerm } from '../../services/businessTermService'
 import type { SortField, SortDir } from '../../services/metadataService'
 import { ApiError, ApiErrorCode } from '../../utils/api'
@@ -15,7 +15,8 @@ import CsvUploadModal from '../upload/CsvUploadModal'
 import BusinessTermsPanel from '../terms/BusinessTermsPanel'
 import LoadingSpinner from '../ui/LoadingSpinner'
 import ErrorMessage from '../ui/ErrorMessage'
-import ErrorToast from '../ui/ErrorToast'
+import Toast from '../ui/Toast'
+import type { ToastVariant } from '../ui/Toast'
 
 /** Explains a rejected edit in terms of what happened to it, since it has already been undone. */
 function editErrorMessage(err: unknown): string {
@@ -23,6 +24,17 @@ function editErrorMessage(err: unknown): string {
     return 'Someone else edited this column first, so your change was not saved. The grid has been refreshed with their version — reapply your edit if it still applies.'
   }
   return err instanceof Error ? err.message : 'Your change could not be saved.'
+}
+
+/**
+ * The same for a pasted range. A paste can fail for some rows and land for the rest, so this
+ * cannot claim the whole paste was lost the way the single-cell message does.
+ */
+function pasteErrorMessage(err: unknown): string {
+  if (err instanceof ApiError && err.code === ApiErrorCode.VersionConflict) {
+    return 'Some pasted cells were not saved, because those columns changed since you loaded them. The rest were saved, and the grid has been refreshed — paste again over the rows that were put back.'
+  }
+  return err instanceof Error ? err.message : 'Some pasted cells could not be saved.'
 }
 
 export default function WorkspacePage() {
@@ -35,7 +47,7 @@ export default function WorkspacePage() {
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [uploadOpen, setUploadOpen] = useState(false)
   const [termsOpen, setTermsOpen] = useState(false)
-  const [editError, setEditError] = useState<string | null>(null)
+  const [toast, setToast] = useState<{ message: string; variant: ToastVariant } | null>(null)
 
   const { coverage, reload: reloadCoverage } = useCoverage()
   const {
@@ -47,6 +59,7 @@ export default function WorkspacePage() {
     loadMore,
     reload: reloadColumns,
     editColumn,
+    editColumns,
     applyTerm,
   } = useMetadataColumns({
     search,
@@ -71,7 +84,7 @@ export default function WorkspacePage() {
         // Coverage is a server-side aggregate, so it is reread rather than adjusted locally.
         reloadCoverage()
       } catch (err: unknown) {
-        setEditError(editErrorMessage(err))
+        setToast({ message: editErrorMessage(err), variant: 'error' })
       }
     },
     [editColumn, reloadCoverage],
@@ -96,9 +109,35 @@ export default function WorkspacePage() {
       reloadCoverage()
     } catch (err: unknown) {
       applyTerm(columnId, previous)
-      setEditError(editErrorMessage(err))
+      setToast({ message: editErrorMessage(err), variant: 'error' })
     }
   }, [terms, applyTerm, reloadCoverage])
+
+  const handlePasteEdits = useCallback(
+    async (edits: ColumnEdits, skippedRows: number) => {
+      // Pasted rows that fell past the end of the loaded window. Saying so matters more than
+      // for a single edit: the user pasted a block and can only see part of where it landed.
+      const truncated =
+        skippedRows > 0
+          ? `${skippedRows.toLocaleString()} pasted ${skippedRows === 1 ? 'row' : 'rows'} fell past the columns loaded so far and were not applied. Scroll further down to load them, then paste again.`
+          : null
+
+      if (edits.length === 0) {
+        if (truncated) setToast({ message: truncated, variant: 'notice' })
+        return
+      }
+
+      try {
+        await editColumns(edits)
+        reloadCoverage()
+
+        if (truncated) setToast({ message: truncated, variant: 'notice' })
+      } catch (err: unknown) {
+        setToast({ message: pasteErrorMessage(err), variant: 'error' })
+      }
+    },
+    [editColumns, reloadCoverage],
+  )
 
   // Depends on sortBy, so it does change identity when the sort does — but the column
   // definitions are rebuilt on a sort change anyway, to move the direction arrow.
@@ -164,6 +203,7 @@ export default function WorkspacePage() {
             onLoadMore={loadMore}
             isLoadingMore={isLoadingMore}
             onTermMap={handleTermMap}
+          onPasteEdits={handlePasteEdits}
             sortBy={sortBy}
             sortDir={sortDir}
             onSortChange={handleSortChange}
@@ -182,8 +222,8 @@ export default function WorkspacePage() {
         />
       )}
 
-      {editError && (
-        <ErrorToast message={editError} onDismiss={() => setEditError(null)} />
+      {toast && (
+        <Toast message={toast.message} variant={toast.variant} onDismiss={() => setToast(null)} />
       )}
 
       {termsOpen && (
