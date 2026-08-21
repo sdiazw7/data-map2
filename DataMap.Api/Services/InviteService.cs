@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using DataMap.Api.Data;
 using DataMap.Api.DTOs;
 using DataMap.Api.Exceptions;
 using DataMap.Api.Models;
@@ -14,6 +15,7 @@ public class InviteService(
     IWorkspaceRepository workspaceRepo,
     IWorkspaceCopyService workspaceCopyService,
     IHttpContextAccessor httpContextAccessor,
+    IUnitOfWork unitOfWork,
     ILogger<InviteService> logger) : BaseService(logger), IInviteService
 {
     public async Task<InviteDto> GetAsync(string token)
@@ -47,27 +49,28 @@ public class InviteService(
         if (string.IsNullOrWhiteSpace(request.Email))
             throw new ValidationException("Email is required.");
 
-        Participant participant;
-        Guid workspaceId;
+        // One transaction across the whole join. A template join copies an entire workspace
+        // before it creates the participant, and the copy is only ever found again by looking
+        // up that participant — so a failure in between would strand the copy permanently and
+        // hand the user a fresh one on every retry.
+        var (participant, workspaceId, session) = await unitOfWork.ExecuteAsync(async () =>
+        {
+            var (joined, joinedWorkspaceId) = invite.TemplateWorkspaceId is not null
+                ? await JoinTemplateInviteAsync(invite, request.Email)
+                : await JoinSharedInviteAsync(invite, request.Email);
 
-        if (invite.TemplateWorkspaceId is not null)
-        {
-            (participant, workspaceId) = await JoinTemplateInviteAsync(invite, request.Email);
-        }
-        else
-        {
-            (participant, workspaceId) = await JoinSharedInviteAsync(invite, request.Email);
-        }
+            var newSession = new ParticipantSession
+            {
+                Id = Guid.NewGuid(),
+                ParticipantId = joined.Id,
+                WorkspaceId = joinedWorkspaceId,
+                CreatedAt = DateTime.UtcNow,
+                LastSeenAt = DateTime.UtcNow,
+            };
+            await sessionRepo.CreateAsync(newSession);
 
-        var session = new ParticipantSession
-        {
-            Id = Guid.NewGuid(),
-            ParticipantId = participant.Id,
-            WorkspaceId = workspaceId,
-            CreatedAt = DateTime.UtcNow,
-            LastSeenAt = DateTime.UtcNow,
-        };
-        await sessionRepo.CreateAsync(session);
+            return (joined, joinedWorkspaceId, newSession);
+        });
 
         var httpContext = httpContextAccessor.HttpContext
             ?? throw new InvalidOperationException("No active HTTP context.");

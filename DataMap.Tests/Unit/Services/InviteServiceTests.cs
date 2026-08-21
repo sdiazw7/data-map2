@@ -1,3 +1,4 @@
+using DataMap.Api.Data;
 using DataMap.Api.DTOs;
 using DataMap.Api.Exceptions;
 using DataMap.Api.Models;
@@ -17,7 +18,16 @@ public class InviteServiceTests
     private readonly Mock<IWorkspaceRepository> _workspaceRepo = new();
     private readonly Mock<IWorkspaceCopyService> _workspaceCopyService = new();
     private readonly Mock<IHttpContextAccessor> _httpContextAccessor = new();
+    private readonly Mock<IUnitOfWork> _unitOfWork = new();
     private readonly Mock<ILogger<InviteService>> _logger = new();
+
+    public InviteServiceTests()
+    {
+        // Run the transactional body inline; committing is EF's concern, not the service's.
+        _unitOfWork
+            .Setup(u => u.ExecuteAsync(It.IsAny<Func<Task<(Participant, Guid, ParticipantSession)>>>()))
+            .Returns<Func<Task<(Participant, Guid, ParticipantSession)>>>(operation => operation());
+    }
 
     private InviteService CreateService() => new(
         _inviteRepo.Object,
@@ -26,6 +36,7 @@ public class InviteServiceTests
         _workspaceRepo.Object,
         _workspaceCopyService.Object,
         _httpContextAccessor.Object,
+        _unitOfWork.Object,
         _logger.Object);
 
     private static Invite MakeInvite(int usedCount = 0, int maxUses = 10, DateTime? expiresAt = null)

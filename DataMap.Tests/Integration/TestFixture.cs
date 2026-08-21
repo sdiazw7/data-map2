@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Moq;
@@ -60,6 +61,10 @@ public class TestFixture : WebApplicationFactory<Program>
             {
                 var opts = new DbContextOptionsBuilder<AppDbContext>()
                     .UseInMemoryDatabase("TestDb_" + Guid.NewGuid().ToString("N"))
+                    // The in-memory provider has no transactions and throws on BeginTransaction
+                    // by default. Services legitimately open one via IUnitOfWork, so downgrade
+                    // that to the no-op the provider already intends.
+                    .ConfigureWarnings(w => w.Ignore(InMemoryEventId.TransactionIgnoredWarning))
                     .Options;
                 return new AppDbContext(opts);
             });

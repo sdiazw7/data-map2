@@ -65,6 +65,13 @@ Unique constraint: `(workspace_id, email)`
 
 Column `version` is used for optimistic concurrency control. `PATCH` requests must include the current version. If a version mismatch occurs → return `409 Conflict`.
 
+`version` is also mapped as an EF concurrency token, so the value that was read is carried into
+each `UPDATE`'s `WHERE` clause and the database rejects a write whose row has moved on. Comparing
+versions in the service alone is not sufficient: that check is a read-then-write, and two
+participants editing the same cell can both read version 5, both pass the check, and both write
+version 6 — losing one edit silently. The token closes that window; the service check remains so
+the common case fails early with a clear error.
+
 **relationships**
 - id
 - workspace_id

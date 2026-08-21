@@ -33,6 +33,11 @@ All metadata edits must write to `metadata_changes`.
 PATCH /metadata/columns
 ```
 
+The audit records are written inside the same transaction as the column edits they describe
+([§4, Metadata Grid](05-metadata-grid.md#4-bulk-metadata-updates)). "All metadata edits" is only
+true if the two commit together — committed separately, a failure in between persists edits that
+the audit log has no record of.
+
 Only fields that actually changed get an audit record — each update diffs `description`, `example_value`, and `owner` individually against the current row, and writes one `metadata_changes` entry per changed field (not one per request or one per column).
 
 ## 3. Documentation Coverage

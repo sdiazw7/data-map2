@@ -23,6 +23,29 @@ public class SchemaRepository(AppDbContext db) : ISchemaRepository
         return schema;
     }
 
+    public async Task<IReadOnlyDictionary<string, Guid>> UpsertManyAsync(
+        Guid workspaceId, IReadOnlyCollection<string> names)
+    {
+        // Ordinal comparison throughout: the (WorkspaceId, Name) unique index is
+        // case-sensitive, so anything looser would treat two rows the database keeps
+        // apart as one and hand back the wrong id.
+        var byName = await db.Schemas
+            .Where(s => s.WorkspaceId == workspaceId)
+            .ToDictionaryAsync(s => s.Name, s => s, StringComparer.Ordinal);
+
+        foreach (var name in names.Distinct(StringComparer.Ordinal))
+        {
+            if (byName.ContainsKey(name)) continue;
+
+            var schema = new Schema { Id = Guid.NewGuid(), WorkspaceId = workspaceId, Name = name };
+            db.Schemas.Add(schema);
+            byName[name] = schema;
+        }
+
+        await db.SaveChangesAsync();
+        return byName.ToDictionary(kv => kv.Key, kv => kv.Value.Id, StringComparer.Ordinal);
+    }
+
     public async Task<List<Schema>> GetAllByWorkspaceAsync(Guid workspaceId)
     {
         return await db.Schemas

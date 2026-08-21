@@ -29,6 +29,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<ColumnCatalogEditor>()
             .HasKey(c => c.ColumnId);
 
+        // The grid saves optimistically, so two participants can hold the same row and submit
+        // edits at once. As a concurrency token, Version lands in the UPDATE's WHERE clause with
+        // the value that was read, so the second write matches no row and EF raises
+        // DbUpdateConcurrencyException instead of silently overwriting the first edit.
+        // No schema change: EF only uses this to shape the generated SQL.
+        modelBuilder.Entity<Column>()
+            .Property(c => c.Version)
+            .IsConcurrencyToken();
+
         // Unique constraints
         modelBuilder.Entity<Schema>()
             .HasIndex(s => new { s.WorkspaceId, s.Name })

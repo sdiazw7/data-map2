@@ -32,6 +32,36 @@ public class TableRepository(AppDbContext db) : ITableRepository
         return table;
     }
 
+    public async Task<IReadOnlyDictionary<(Guid SchemaId, string Name), Guid>> UpsertManyAsync(
+        Guid workspaceId, IReadOnlyCollection<(Guid SchemaId, string Name)> tables)
+    {
+        var existing = await db.Tables
+            .Where(t => t.WorkspaceId == workspaceId)
+            .ToListAsync();
+        var byKey = existing.ToDictionary(t => (t.SchemaId, t.Name), t => t);
+
+        var now = DateTime.UtcNow;
+        foreach (var key in tables.Distinct())
+        {
+            if (byKey.ContainsKey(key)) continue;
+
+            var table = new Table
+            {
+                Id = Guid.NewGuid(),
+                WorkspaceId = workspaceId,
+                SchemaId = key.SchemaId,
+                Name = key.Name,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+            db.Tables.Add(table);
+            byKey[key] = table;
+        }
+
+        await db.SaveChangesAsync();
+        return byKey.ToDictionary(kv => kv.Key, kv => kv.Value.Id);
+    }
+
     public async Task<List<Table>> GetAllByWorkspaceAsync(Guid workspaceId)
     {
         return await db.Tables

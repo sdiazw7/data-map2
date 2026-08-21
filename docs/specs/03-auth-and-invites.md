@@ -74,6 +74,16 @@ Every participant gets their **own private copy** of the template workspace inst
 
 This ensures returning users keep their history while invite usage limits still function correctly, and — for template invites — that each participant edits their own copy without stepping on anyone else's data.
 
+### Atomicity
+
+A join spans several writes — workspace copy, participant, `used_count`, session — and they commit as
+a single transaction ([§1, Backend Architecture](02-backend-architecture.md#1-backend-architecture)).
+
+This matters most for a template invite, where the copy is created before the participant. A copied
+workspace is only ever found again by looking up a participant with that email against
+`source_template_id`, so a failure between those two writes would strand the copy with nothing
+pointing at it — and the user would be handed a fresh copy on every retry, accumulating orphans.
+
 ## 2b. Invite Creation
 
 **Endpoint:** `POST /invites` (protected — requires an active session; the workspace is taken from the caller's session, not the request body)

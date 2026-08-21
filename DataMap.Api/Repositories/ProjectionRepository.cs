@@ -84,8 +84,21 @@ public class ProjectionRepository(AppDbContext db) : IProjectionRepository
         // Delete and reinsert must commit together. Without a transaction the delete is
         // visible on its own, so concurrent readers see an empty catalog mid-rebuild, and
         // a failed insert leaves the workspace's projection permanently empty.
-        await using var transaction = await db.Database.BeginTransactionAsync();
+        // A caller may already have opened one (CSV upload rebuilds inside its own unit of
+        // work); nesting a second transaction would throw, so reuse the ambient one.
+        if (db.Database.CurrentTransaction is not null)
+        {
+            await RebuildAsync(workspaceId);
+            return;
+        }
 
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        await RebuildAsync(workspaceId);
+        await transaction.CommitAsync();
+    }
+
+    private async Task RebuildAsync(Guid workspaceId)
+    {
         await db.ColumnCatalogEditor
             .Where(c => c.WorkspaceId == workspaceId)
             .ExecuteDeleteAsync();
@@ -112,8 +125,6 @@ public class ProjectionRepository(AppDbContext db) : IProjectionRepository
             LEFT JOIN app.""BusinessTerms"" bt ON bt.""Id"" = tcm.""TermId""
             WHERE col.""WorkspaceId"" = {0}",
             workspaceId);
-
-        await transaction.CommitAsync();
     }
 
     public async Task<(int Total, int Documented)> GetCoverageCountsAsync(Guid workspaceId)
