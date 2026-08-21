@@ -4,10 +4,10 @@ import { useCoverage } from '../../hooks/useCoverage'
 import { useMetadataColumns } from '../../hooks/useMetadataColumns'
 import { useBusinessTerms } from '../../hooks/useBusinessTerms'
 import { useTableNames } from '../../hooks/useTableNames'
-import { useBulkUpdate } from '../../hooks/useBulkUpdate'
+import type { ColumnEdit } from '../../hooks/useMetadataColumns'
 import { setColumnBusinessTerm, clearColumnBusinessTerm } from '../../services/businessTermService'
 import type { SortField, SortDir } from '../../services/metadataService'
-import type { ColumnUpdateRequest } from '../../types/api'
+import { ApiError, ApiErrorCode } from '../../utils/api'
 import CoverageBanner from '../coverage/CoverageBanner'
 import GridToolbar from '../grid/GridToolbar'
 import MetadataGrid from '../grid/MetadataGrid'
@@ -15,6 +15,15 @@ import CsvUploadModal from '../upload/CsvUploadModal'
 import BusinessTermsPanel from '../terms/BusinessTermsPanel'
 import LoadingSpinner from '../ui/LoadingSpinner'
 import ErrorMessage from '../ui/ErrorMessage'
+import ErrorToast from '../ui/ErrorToast'
+
+/** Explains a rejected edit in terms of what happened to it, since it has already been undone. */
+function editErrorMessage(err: unknown): string {
+  if (err instanceof ApiError && err.code === ApiErrorCode.VersionConflict) {
+    return 'Someone else edited this column first, so your change was not saved. The grid has been refreshed with their version — reapply your edit if it still applies.'
+  }
+  return err instanceof Error ? err.message : 'Your change could not be saved.'
+}
 
 export default function WorkspacePage() {
   const { session } = useSession()
@@ -26,9 +35,10 @@ export default function WorkspacePage() {
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [uploadOpen, setUploadOpen] = useState(false)
   const [termsOpen, setTermsOpen] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
 
   const { coverage, reload: reloadCoverage } = useCoverage()
-  const { columns, total, isLoading, error, reload: reloadColumns, applyUpdate, applyTerm } =
+  const { columns, total, isLoading, error, reload: reloadColumns, editColumn, applyTerm } =
     useMetadataColumns({
       search,
       undocumentedOnly,
@@ -38,7 +48,6 @@ export default function WorkspacePage() {
     })
   const { terms, isLoading: termsLoading, error: termsError, create: createTerm } = useBusinessTerms()
   const { tableNames, reload: reloadTableNames } = useTableNames()
-  const { mutate } = useBulkUpdate()
 
   const didDefaultTable = useRef(false)
   useEffect(() => {
@@ -48,26 +57,37 @@ export default function WorkspacePage() {
     }
   }, [tableNames])
 
-  async function handleUpdate(update: ColumnUpdateRequest) {
-    const result = await mutate([update])
+  // The grid calls these from cell handlers that cannot await, so neither may reject — a
+  // rejection here would be an unhandled one, which is how a failed edit used to disappear.
+  async function handleEdit(columnId: string, edit: ColumnEdit) {
+    try {
+      await editColumn(columnId, edit)
 
-    // The response carries the new versions, so the edited row is reconciled in place rather
-    // than refetching the page. Coverage is a server-side aggregate and still has to be reread.
-    applyUpdate(update, result.columns)
-    reloadCoverage()
+      // Coverage is a server-side aggregate, so it is reread rather than adjusted locally.
+      reloadCoverage()
+    } catch (err: unknown) {
+      setEditError(editErrorMessage(err))
+    }
   }
 
   async function handleTermMap(columnId: string, termId: string) {
     // The empty option in the term cell means "no term", which is a delete, not a mapping.
-    if (termId) {
-      await setColumnBusinessTerm(columnId, termId)
-      applyTerm(columnId, terms.find(t => t.id === termId)?.name ?? null)
-    } else {
-      await clearColumnBusinessTerm(columnId)
-      applyTerm(columnId, null)
-    }
+    const termName = termId ? terms.find(t => t.id === termId)?.name ?? null : null
 
-    reloadCoverage()
+    // Applied first so the cell moves with the click; applyTerm hands back what it replaced.
+    const previous = applyTerm(columnId, termName)
+
+    try {
+      if (termId) {
+        await setColumnBusinessTerm(columnId, termId)
+      } else {
+        await clearColumnBusinessTerm(columnId)
+      }
+      reloadCoverage()
+    } catch (err: unknown) {
+      applyTerm(columnId, previous)
+      setEditError(editErrorMessage(err))
+    }
   }
 
   function handleSortChange(field: SortField) {
@@ -124,7 +144,7 @@ export default function WorkspacePage() {
           <MetadataGrid
             columns={columns}
             terms={terms}
-            onUpdate={handleUpdate}
+            onEdit={handleEdit}
             onTermMap={handleTermMap}
             sortBy={sortBy}
             sortDir={sortDir}
@@ -142,6 +162,10 @@ export default function WorkspacePage() {
             reloadTableNames()
           }}
         />
+      )}
+
+      {editError && (
+        <ErrorToast message={editError} onDismiss={() => setEditError(null)} />
       )}
 
       {termsOpen && (

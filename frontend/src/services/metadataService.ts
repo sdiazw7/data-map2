@@ -6,7 +6,7 @@ import type {
   ImportSummary,
   PagedResult,
 } from '../types/api'
-import { apiFetch } from '../utils/api'
+import { apiFetch, toApiError } from '../utils/api'
 
 /** Sort fields are the response field names, so one identifier does both jobs. */
 export type SortField = 'columnName' | 'tableName' | 'dataType' | 'owner'
@@ -59,8 +59,7 @@ export async function importCsv(file: File): Promise<ImportSummary> {
     body: form,
   })
   if (!res.ok) {
-    const body = await res.json().catch(() => null)
-    throw new Error(body?.error?.message ?? `Upload failed: ${res.status}`)
+    throw await toApiError(res)
   }
   return (await res.json()) as ImportSummary
 }

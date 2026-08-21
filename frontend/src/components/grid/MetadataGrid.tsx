@@ -6,7 +6,8 @@ import {
   useReactTable,
 } from '@tanstack/react-table'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import type { ColumnGridRow, ColumnUpdateRequest, BusinessTermDto } from '../../types/api'
+import type { ColumnGridRow, BusinessTermDto } from '../../types/api'
+import type { ColumnEdit } from '../../hooks/useMetadataColumns'
 import type { SortField, SortDir } from '../../services/metadataService'
 import GridCell from './GridCell'
 import BusinessTermCell from './BusinessTermCell'
@@ -14,7 +15,7 @@ import BusinessTermCell from './BusinessTermCell'
 type Props = {
   columns: ColumnGridRow[]
   terms: BusinessTermDto[]
-  onUpdate: (update: ColumnUpdateRequest) => void
+  onEdit: (columnId: string, edit: ColumnEdit) => void
   onTermMap: (columnId: string, termId: string) => void
   sortBy: SortField
   sortDir: SortDir
@@ -23,7 +24,7 @@ type Props = {
 
 const columnHelper = createColumnHelper<ColumnGridRow>()
 
-export default function MetadataGrid({ columns: rows, terms, onUpdate, onTermMap, sortBy, sortDir, onSortChange }: Props) {
+export default function MetadataGrid({ columns: rows, terms, onEdit, onTermMap, sortBy, sortDir, onSortChange }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
 
   function sortableHeader(label: string, field: SortField) {
@@ -64,15 +65,7 @@ export default function MetadataGrid({ columns: rows, terms, onUpdate, onTermMap
       cell: ({ row }) => (
         <GridCell
           value={row.original.description}
-          onChange={val =>
-            onUpdate({
-              columnId: row.original.columnId,
-              description: val || null,
-              exampleValue: row.original.exampleValue,
-              owner: row.original.owner,
-              version: row.original.version,
-            })
-          }
+          onChange={val => onEdit(row.original.columnId, { description: val || null })}
         />
       ),
     }),
@@ -82,15 +75,7 @@ export default function MetadataGrid({ columns: rows, terms, onUpdate, onTermMap
       cell: ({ row }) => (
         <GridCell
           value={row.original.exampleValue}
-          onChange={val =>
-            onUpdate({
-              columnId: row.original.columnId,
-              description: row.original.description,
-              exampleValue: val || null,
-              owner: row.original.owner,
-              version: row.original.version,
-            })
-          }
+          onChange={val => onEdit(row.original.columnId, { exampleValue: val || null })}
         />
       ),
     }),
@@ -100,15 +85,7 @@ export default function MetadataGrid({ columns: rows, terms, onUpdate, onTermMap
       cell: ({ row }) => (
         <GridCell
           value={row.original.owner}
-          onChange={val =>
-            onUpdate({
-              columnId: row.original.columnId,
-              description: row.original.description,
-              exampleValue: row.original.exampleValue,
-              owner: val || null,
-              version: row.original.version,
-            })
-          }
+          onChange={val => onEdit(row.original.columnId, { owner: val || null })}
         />
       ),
     }),
@@ -129,6 +106,10 @@ export default function MetadataGrid({ columns: rows, terms, onUpdate, onTermMap
     data: rows,
     columns: tableColumns,
     getCoreRowModel: getCoreRowModel(),
+    // Without this the row id is its index, so React keys cells by screen position. A cell
+    // open for editing would stay mounted across a re-sort, a filter change, or the reload a
+    // version conflict triggers, and commit its draft into whichever column took that slot.
+    getRowId: row => row.columnId,
   })
 
   const { rows: tableRows } = table.getRowModel()
