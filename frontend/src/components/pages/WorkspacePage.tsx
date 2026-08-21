@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState } from 'react'
 import { useSession } from '../../hooks/useSession'
 import { useCoverage } from '../../hooks/useCoverage'
 import { useMetadataColumns } from '../../hooks/useMetadataColumns'
@@ -38,24 +38,25 @@ export default function WorkspacePage() {
   const [editError, setEditError] = useState<string | null>(null)
 
   const { coverage, reload: reloadCoverage } = useCoverage()
-  const { columns, total, isLoading, error, reload: reloadColumns, editColumn, applyTerm } =
-    useMetadataColumns({
-      search,
-      undocumentedOnly,
-      tableName: tableName || undefined,
-      sortBy,
-      sortDir,
-    })
+  const {
+    columns,
+    total,
+    isLoading,
+    isLoadingMore,
+    error,
+    loadMore,
+    reload: reloadColumns,
+    editColumn,
+    applyTerm,
+  } = useMetadataColumns({
+    search,
+    undocumentedOnly,
+    tableName: tableName || undefined,
+    sortBy,
+    sortDir,
+  })
   const { terms, isLoading: termsLoading, error: termsError, create: createTerm } = useBusinessTerms()
   const { tableNames, reload: reloadTableNames } = useTableNames()
-
-  const didDefaultTable = useRef(false)
-  useEffect(() => {
-    if (!didDefaultTable.current && tableNames.length > 0) {
-      setTableName(tableNames[0])
-      didDefaultTable.current = true
-    }
-  }, [tableNames])
 
   // The grid calls these from cell handlers that cannot await, so neither may reject — a
   // rejection here would be an unhandled one, which is how a failed edit used to disappear.
@@ -145,6 +146,9 @@ export default function WorkspacePage() {
             columns={columns}
             terms={terms}
             onEdit={handleEdit}
+            total={total}
+            onLoadMore={loadMore}
+            isLoadingMore={isLoadingMore}
             onTermMap={handleTermMap}
             sortBy={sortBy}
             sortDir={sortDir}

@@ -22,7 +22,10 @@ export type ColumnsQuery = {
   sortDir?: SortDir
 }
 
-export async function getColumns(query: ColumnsQuery): Promise<PagedResult<ColumnGridRow>> {
+export async function getColumns(
+  query: ColumnsQuery,
+  signal?: AbortSignal,
+): Promise<PagedResult<ColumnGridRow>> {
   const params = new URLSearchParams()
   if (query.limit !== undefined) params.set('limit', String(query.limit))
   if (query.offset !== undefined) params.set('offset', String(query.offset))
@@ -31,7 +34,7 @@ export async function getColumns(query: ColumnsQuery): Promise<PagedResult<Colum
   if (query.tableName) params.set('tableName', query.tableName)
   if (query.sortBy) params.set('sortBy', query.sortBy)
   if (query.sortDir) params.set('sortDir', query.sortDir)
-  return apiFetch<PagedResult<ColumnGridRow>>(`/columns?${params}`)
+  return apiFetch<PagedResult<ColumnGridRow>>(`/columns?${params}`, { signal })
 }
 
 export async function getTableNames(limit = 500, offset = 0): Promise<PagedResult<string>> {

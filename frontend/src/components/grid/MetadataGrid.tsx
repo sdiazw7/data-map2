@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import {
   createColumnHelper,
   flexRender,
@@ -16,6 +16,11 @@ type Props = {
   columns: ColumnGridRow[]
   terms: BusinessTermDto[]
   onEdit: (columnId: string, edit: ColumnEdit) => void
+  /** Rows matching the filters across all pages; the loaded ones are in `columns`. */
+  total: number
+  /** Asked for as the user nears the end of what is loaded. */
+  onLoadMore: () => void
+  isLoadingMore: boolean
   onTermMap: (columnId: string, termId: string) => void
   sortBy: SortField
   sortDir: SortDir
@@ -24,7 +29,24 @@ type Props = {
 
 const columnHelper = createColumnHelper<ColumnGridRow>()
 
-export default function MetadataGrid({ columns: rows, terms, onEdit, onTermMap, sortBy, sortDir, onSortChange }: Props) {
+/**
+ * How close to the last loaded row the viewport gets before the next page is requested. Two
+ * screens' worth, so the fetch is usually done before the user reaches the rows it holds.
+ */
+const LOAD_MORE_THRESHOLD = 40
+
+export default function MetadataGrid({
+  columns: rows,
+  terms,
+  onEdit,
+  onTermMap,
+  total,
+  onLoadMore,
+  isLoadingMore,
+  sortBy,
+  sortDir,
+  onSortChange,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
 
   function sortableHeader(label: string, field: SortField) {
@@ -127,6 +149,16 @@ export default function MetadataGrid({ columns: rows, terms, onEdit, onTermMap, 
   const paddingBottom =
     virtualRows.length > 0 ? totalSize - virtualRows[virtualRows.length - 1].end : 0
 
+  // The window extends from what is actually on screen rather than from a scroll offset, so it
+  // also covers the case where the first page does not fill the viewport and no scroll ever
+  // happens.
+  const lastVisibleIndex = virtualRows.length > 0 ? virtualRows[virtualRows.length - 1].index : 0
+
+  useEffect(() => {
+    if (rows.length === 0 || rows.length >= total) return
+    if (lastVisibleIndex >= rows.length - LOAD_MORE_THRESHOLD) onLoadMore()
+  }, [lastVisibleIndex, rows.length, total, onLoadMore])
+
   if (rows.length === 0) {
     return (
       <div className="flex items-center justify-center h-full text-gray-500 text-sm">
@@ -181,6 +213,11 @@ export default function MetadataGrid({ columns: rows, terms, onEdit, onTermMap, 
           )}
         </tbody>
       </table>
+      {isLoadingMore && (
+        <div className="py-3 text-center text-sm text-gray-500" aria-live="polite">
+          Loading more columns...
+        </div>
+      )}
     </div>
   )
 }
