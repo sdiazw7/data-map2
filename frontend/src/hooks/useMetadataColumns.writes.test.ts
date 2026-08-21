@@ -250,6 +250,37 @@ describe('useMetadataColumns write queue', () => {
     )
   })
 
+  it('reconciles a whole batch in one pass over the window', async () => {
+    const { result } = await renderLoaded()
+    const before = result.current.columns
+
+    act(() => {
+      void ignore(result.current.editColumn('c1', { description: 'A' }))
+      void ignore(result.current.editColumn('c2', { description: 'B' }))
+    })
+
+    await waitFor(() => expect(writes).toHaveLength(1))
+    const optimistic = result.current.columns
+    expect(optimistic).not.toBe(before)
+
+    await act(async () => {
+      writes[0].settle.resolve({
+        columns: [
+          { columnId: 'c1', version: 2 },
+          { columnId: 'c2', version: 2 },
+        ],
+        conflicts: [],
+      })
+      await Promise.resolve()
+    })
+
+    // Both versions land together. Reconciling row by row rebuilt the whole array once per
+    // row, which is what made a large paste crawl.
+    expect(result.current.columns[0].version).toBe(2)
+    expect(result.current.columns[1].version).toBe(2)
+    expect(result.current.columns).not.toBe(optimistic)
+  })
+
   it('keeps a queued edit on screen when the write it was typed over fails', async () => {
     const { result } = await renderLoaded()
     const failure = new ApiError(500, 'INTERNAL_ERROR', 'An unexpected error occurred.')

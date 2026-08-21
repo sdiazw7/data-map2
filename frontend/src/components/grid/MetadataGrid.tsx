@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import {
   createColumnHelper,
   flexRender,
@@ -49,80 +49,87 @@ export default function MetadataGrid({
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
 
-  function sortableHeader(label: string, field: SortField) {
-    const isActive = sortBy === field
-    return (
-      <button
-        type="button"
-        onClick={() => onSortChange(field)}
-        className="flex items-center gap-1 font-semibold uppercase tracking-wider hover:text-gray-900"
-        aria-label={`Sort by ${label}`}
-      >
-        {label}
-        {isActive && <span aria-hidden="true">{sortDir === 'asc' ? '▲' : '▼'}</span>}
-      </button>
-    )
-  }
+  // Memoised because the table reads it by identity: a fresh array each render made TanStack
+  // rebuild every column definition, which in turn threw away the per-row cell memos for the
+  // rows on screen. This is the measurable case the performance rule leaves room for, not a
+  // preemptive one — it only holds if the handlers below stay stable too, which is why
+  // WorkspacePage wraps them.
+  const tableColumns = useMemo(() => {
+    function sortableHeader(label: string, field: SortField) {
+      const isActive = sortBy === field
+      return (
+        <button
+          type="button"
+          onClick={() => onSortChange(field)}
+          className="flex items-center gap-1 font-semibold uppercase tracking-wider hover:text-gray-900"
+          aria-label={`Sort by ${label}`}
+        >
+          {label}
+          {isActive && <span aria-hidden="true">{sortDir === 'asc' ? '▲' : '▼'}</span>}
+        </button>
+      )
+    }
 
-  const tableColumns = [
-    columnHelper.accessor('schemaName', {
-      header: 'Schema',
-      cell: info => info.getValue() ?? '',
-    }),
-    columnHelper.accessor('tableName', {
-      header: () => sortableHeader('Table', 'tableName'),
-      cell: info => info.getValue() ?? '',
-    }),
-    columnHelper.accessor('columnName', {
-      header: () => sortableHeader('Column', 'columnName'),
-      cell: info => info.getValue() ?? '',
-    }),
-    columnHelper.accessor('dataType', {
-      header: () => sortableHeader('Type', 'dataType'),
-      cell: info => info.getValue() ?? '',
-    }),
-    columnHelper.display({
-      id: 'description',
-      header: 'Description',
-      cell: ({ row }) => (
-        <GridCell
-          value={row.original.description}
-          onChange={val => onEdit(row.original.columnId, { description: val || null })}
-        />
-      ),
-    }),
-    columnHelper.display({
-      id: 'exampleValue',
-      header: 'Example',
-      cell: ({ row }) => (
-        <GridCell
-          value={row.original.exampleValue}
-          onChange={val => onEdit(row.original.columnId, { exampleValue: val || null })}
-        />
-      ),
-    }),
-    columnHelper.display({
-      id: 'owner',
-      header: () => sortableHeader('Owner', 'owner'),
-      cell: ({ row }) => (
-        <GridCell
-          value={row.original.owner}
-          onChange={val => onEdit(row.original.columnId, { owner: val || null })}
-        />
-      ),
-    }),
-    columnHelper.display({
-      id: 'businessTerm',
-      header: 'Business Term',
-      cell: ({ row }) => (
-        <BusinessTermCell
-          value={row.original.businessTerm}
-          terms={terms}
-          onChange={termId => onTermMap(row.original.columnId, termId)}
-        />
-      ),
-    }),
-  ]
+    return [
+      columnHelper.accessor('schemaName', {
+        header: 'Schema',
+        cell: info => info.getValue() ?? '',
+      }),
+      columnHelper.accessor('tableName', {
+        header: () => sortableHeader('Table', 'tableName'),
+        cell: info => info.getValue() ?? '',
+      }),
+      columnHelper.accessor('columnName', {
+        header: () => sortableHeader('Column', 'columnName'),
+        cell: info => info.getValue() ?? '',
+      }),
+      columnHelper.accessor('dataType', {
+        header: () => sortableHeader('Type', 'dataType'),
+        cell: info => info.getValue() ?? '',
+      }),
+      columnHelper.display({
+        id: 'description',
+        header: 'Description',
+        cell: ({ row }) => (
+          <GridCell
+            value={row.original.description}
+            onChange={val => onEdit(row.original.columnId, { description: val || null })}
+          />
+        ),
+      }),
+      columnHelper.display({
+        id: 'exampleValue',
+        header: 'Example',
+        cell: ({ row }) => (
+          <GridCell
+            value={row.original.exampleValue}
+            onChange={val => onEdit(row.original.columnId, { exampleValue: val || null })}
+          />
+        ),
+      }),
+      columnHelper.display({
+        id: 'owner',
+        header: () => sortableHeader('Owner', 'owner'),
+        cell: ({ row }) => (
+          <GridCell
+            value={row.original.owner}
+            onChange={val => onEdit(row.original.columnId, { owner: val || null })}
+          />
+        ),
+      }),
+      columnHelper.display({
+        id: 'businessTerm',
+        header: 'Business Term',
+        cell: ({ row }) => (
+          <BusinessTermCell
+            value={row.original.businessTerm}
+            terms={terms}
+            onChange={termId => onTermMap(row.original.columnId, termId)}
+          />
+        ),
+      }),
+    ]
+  }, [terms, onEdit, onTermMap, sortBy, sortDir, onSortChange])
 
   const table = useReactTable({
     data: rows,

@@ -126,11 +126,28 @@ export function useMetadataColumns(query: ColumnsQuery): UseMetadataColumnsResul
     setTotal(value)
   }, [])
 
-  const patchRow = useCallback(
-    (columnId: string, patch: Partial<ColumnGridRow>) => {
-      setRows(rows => rows.map(row => (row.columnId === columnId ? { ...row, ...patch } : row)))
+  /**
+   * Applies one patch per row in a single pass. Reconciling a batch used to call patchRow once
+   * per row, and every one of those mapped the whole window: a 500-row paste over a window of
+   * 100k rows walked 50M rows and produced 500 new arrays, for what is one change to the grid.
+   */
+  const patchRows = useCallback(
+    (patches: Map<string, Partial<ColumnGridRow>>) => {
+      if (patches.size === 0) return
+
+      setRows(rows =>
+        rows.map(row => {
+          const patch = patches.get(row.columnId)
+          return patch ? { ...row, ...patch } : row
+        }),
+      )
     },
     [setRows],
+  )
+
+  const patchRow = useCallback(
+    (columnId: string, patch: Partial<ColumnGridRow>) => patchRows(new Map([[columnId, patch]])),
+    [patchRows],
   )
 
   const reload = useCallback(() => setTick(t => t + 1), [])
@@ -205,28 +222,31 @@ export function useMetadataColumns(query: ColumnsQuery): UseMetadataColumnsResul
   )
 
   /**
-   * Undoes a batch's optimistic patches, field by field. Only the fields the batch touched are
-   * undone, so a term mapping that landed on one of the rows in the meantime survives.
+   * The patches that undo a batch's optimistic changes, field by field. Only the fields the
+   * batch touched are undone, so a term mapping that landed on one of the rows in the meantime
+   * survives. Returned rather than applied so a partly-applied batch can undo the rows the
+   * server declined in the same pass that confirms the ones it took.
    */
-  const rollBack = useCallback(
-    (entries: [string, PendingWrite][]) => {
-      for (const [columnId, write] of entries) {
-        const queued = pendingRef.current.get(columnId)
-        const revert: ColumnEdit = {}
+  const rollBackPatches = useCallback((entries: [string, PendingWrite][]) => {
+    const patches = new Map<string, ColumnEdit>()
 
-        for (const field of touchedFields(write.before)) {
-          // A newer edit to this field is already queued. It owns what the cell shows, and it
-          // carries the same confirmed baseline, so undoing it here would throw away the
-          // keystrokes the user typed while this write was in flight.
-          if (queued && field in queued.before) continue
-          revert[field] = write.before[field]
-        }
+    for (const [columnId, write] of entries) {
+      const queued = pendingRef.current.get(columnId)
+      const revert: ColumnEdit = {}
 
-        patchRow(columnId, revert)
+      for (const field of touchedFields(write.before)) {
+        // A newer edit to this field is already queued. It owns what the cell shows, and it
+        // carries the same confirmed baseline, so undoing it here would throw away the
+        // keystrokes the user typed while this write was in flight.
+        if (queued && field in queued.before) continue
+        revert[field] = write.before[field]
       }
-    },
-    [patchRow],
-  )
+
+      patches.set(columnId, revert)
+    }
+
+    return patches
+  }, [])
 
   const scheduleFlush = useCallback(() => {
     if (flushScheduledRef.current || isFlushingRef.current) return
@@ -267,21 +287,28 @@ export function useMetadataColumns(query: ColumnsQuery): UseMetadataColumnsResul
       // place. Without it they would keep the versions they just spent and every later edit
       // would conflict.
       const versions = new Map(result.columns.map(c => [c.columnId, c.version]))
+      const declined = new Set(result.conflicts.map(c => c.columnId))
+
+      // Confirmations and undos go on in one pass. They never touch the same row — the server
+      // returns a row as applied or as declined, never both.
+      const patches = new Map<string, Partial<ColumnGridRow>>()
       for (const [columnId] of batch) {
         const version = versions.get(columnId)
-        if (version !== undefined) patchRow(columnId, { version })
+        if (version !== undefined) patches.set(columnId, { version })
       }
 
       // The rows the server declined as stale. The rest of the batch was applied, so only
       // these are put back — one cell that moved under the user does not undo the others.
-      const declined = new Set(result.conflicts.map(c => c.columnId))
-      if (declined.size > 0) {
-        const conflicted = batch.filter(([columnId]) => declined.has(columnId))
+      const conflicted = batch.filter(([columnId]) => declined.has(columnId))
+      for (const [columnId, revert] of rollBackPatches(conflicted)) {
+        patches.set(columnId, revert)
+      }
 
-        rollBack(conflicted)
+      patchRows(patches)
 
-        // Rolling back restores what we last saw, which is already out of date — only a
-        // refetch gets the winning values and a version the next edit can spend.
+      // Rolling back restores what we last saw, which is already out of date — only a refetch
+      // gets the winning values and a version the next edit can spend.
+      if (conflicted.length > 0) {
         void refreshPagesFor(conflicted.map(([columnId]) => columnId))
       }
 
@@ -293,7 +320,7 @@ export function useMetadataColumns(query: ColumnsQuery): UseMetadataColumnsResul
         }
       }
     } catch (err: unknown) {
-      rollBack(batch)
+      patchRows(rollBackPatches(batch))
 
       // The database rejected the write outright, which it cannot attribute to a single row,
       // so the whole batch failed and every row in it needs its winning values back.
@@ -309,7 +336,7 @@ export function useMetadataColumns(query: ColumnsQuery): UseMetadataColumnsResul
       // Edits made while this batch was in flight are waiting on the version it just returned.
       if (pendingRef.current.size > 0) scheduleFlush()
     }
-  }, [patchRow, rollBack, refreshPagesFor, scheduleFlush])
+  }, [patchRows, rollBackPatches, refreshPagesFor, scheduleFlush])
 
   flushRef.current = () => void flush()
 

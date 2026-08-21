@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useSession } from '../../hooks/useSession'
 import { useCoverage } from '../../hooks/useCoverage'
 import { useMetadataColumns } from '../../hooks/useMetadataColumns'
@@ -60,18 +60,24 @@ export default function WorkspacePage() {
 
   // The grid calls these from cell handlers that cannot await, so neither may reject — a
   // rejection here would be an unhandled one, which is how a failed edit used to disappear.
-  async function handleEdit(columnId: string, edit: ColumnEdit) {
-    try {
-      await editColumn(columnId, edit)
+  //
+  // Wrapped so their identity survives a re-render: the grid builds its column definitions from
+  // them, and a new function each render would rebuild every definition on every keystroke.
+  const handleEdit = useCallback(
+    async (columnId: string, edit: ColumnEdit) => {
+      try {
+        await editColumn(columnId, edit)
 
-      // Coverage is a server-side aggregate, so it is reread rather than adjusted locally.
-      reloadCoverage()
-    } catch (err: unknown) {
-      setEditError(editErrorMessage(err))
-    }
-  }
+        // Coverage is a server-side aggregate, so it is reread rather than adjusted locally.
+        reloadCoverage()
+      } catch (err: unknown) {
+        setEditError(editErrorMessage(err))
+      }
+    },
+    [editColumn, reloadCoverage],
+  )
 
-  async function handleTermMap(columnId: string, termId: string) {
+  const handleTermMap = useCallback(async (columnId: string, termId: string) => {
     // The empty option in the term cell means "no term", which is a delete, not a mapping.
     const termName = termId ? terms.find(t => t.id === termId)?.name ?? null : null
 
@@ -92,16 +98,21 @@ export default function WorkspacePage() {
       applyTerm(columnId, previous)
       setEditError(editErrorMessage(err))
     }
-  }
+  }, [terms, applyTerm, reloadCoverage])
 
-  function handleSortChange(field: SortField) {
-    if (field === sortBy) {
-      setSortDir(dir => (dir === 'asc' ? 'desc' : 'asc'))
-    } else {
-      setSortBy(field)
-      setSortDir('asc')
-    }
-  }
+  // Depends on sortBy, so it does change identity when the sort does — but the column
+  // definitions are rebuilt on a sort change anyway, to move the direction arrow.
+  const handleSortChange = useCallback(
+    (field: SortField) => {
+      if (field === sortBy) {
+        setSortDir(dir => (dir === 'asc' ? 'desc' : 'asc'))
+      } else {
+        setSortBy(field)
+        setSortDir('asc')
+      }
+    },
+    [sortBy],
+  )
 
   if (!session) {
     return (
