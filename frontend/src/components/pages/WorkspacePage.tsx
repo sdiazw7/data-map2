@@ -79,11 +79,14 @@ export default function WorkspacePage() {
     const previous = applyTerm(columnId, termName)
 
     try {
-      if (termId) {
-        await setColumnBusinessTerm(columnId, termId)
-      } else {
-        await clearColumnBusinessTerm(columnId)
-      }
+      const result = termId
+        ? await setColumnBusinessTerm(columnId, termId)
+        : await clearColumnBusinessTerm(columnId)
+
+      // The mapping moved the row's version. Without taking the new one the next edit to this
+      // row would spend a version the server has already retired, and be rejected as stale.
+      applyTerm(columnId, termName, result.version)
+
       reloadCoverage()
     } catch (err: unknown) {
       applyTerm(columnId, previous)

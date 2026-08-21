@@ -52,32 +52,35 @@ public static class ColumnEndpoints
             HttpContext ctx,
             IBusinessTermService svc) =>
         {
-            await svc.MapToColumnAsync(ctx.WorkspaceId(), columnId, req.TermId);
-            return Results.NoContent();
+            var result = await svc.MapToColumnAsync(ctx.WorkspaceId(), ctx.ParticipantId(), columnId, req.TermId);
+            return Results.Ok(result);
         })
         .WithName("SetColumnBusinessTerm")
         .WithTags("Columns")
-        .WithSummary("Assigns a business term to the column, replacing any existing assignment.")
-        .Produces(StatusCodes.Status204NoContent)
+        .WithSummary("Assigns a business term to the column, replacing any existing assignment, and returns the column's new version.")
+        .Produces<ColumnVersionDto>()
         .ProducesAuthErrors()
         .ProducesApiErrors(
             StatusCodes.Status400BadRequest,
-            StatusCodes.Status404NotFound);
+            StatusCodes.Status404NotFound,
+            StatusCodes.Status409Conflict);
 
         app.MapDelete("/columns/{columnId:guid}/business-term", async (
             Guid columnId,
             HttpContext ctx,
             IBusinessTermService svc) =>
         {
-            await svc.UnmapFromColumnAsync(ctx.WorkspaceId(), columnId);
-            return Results.NoContent();
+            var result = await svc.UnmapFromColumnAsync(ctx.WorkspaceId(), ctx.ParticipantId(), columnId);
+            return Results.Ok(result);
         })
         .WithName("ClearColumnBusinessTerm")
         .WithTags("Columns")
-        .WithSummary("Clears the column's business term.")
-        .Produces(StatusCodes.Status204NoContent)
+        .WithSummary("Clears the column's business term and returns the column's new version.")
+        .Produces<ColumnVersionDto>()
         .ProducesAuthErrors()
-        .ProducesApiErrors(StatusCodes.Status404NotFound);
+        .ProducesApiErrors(
+            StatusCodes.Status404NotFound,
+            StatusCodes.Status409Conflict);
 
         app.MapGet("/tables", async (HttpContext ctx, IMetadataService svc, int limit = 500, int offset = 0) =>
         {

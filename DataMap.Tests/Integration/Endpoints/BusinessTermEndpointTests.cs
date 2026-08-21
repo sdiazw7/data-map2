@@ -200,19 +200,24 @@ public class BusinessTermEndpointTests(TestFixture fixture) : IClassFixture<Test
     // ── PUT /columns/{columnId}/business-term ────────────────────────────────
 
     [Fact]
-    public async Task SetColumnTerm_ValidRequest_Returns204()
+    public async Task SetColumnTerm_ValidRequest_Returns200WithTheColumnsNewVersion()
     {
         var columnId = Guid.NewGuid();
         var termId = Guid.NewGuid();
-        fixture.BusinessTermService.Setup(s => s.MapToColumnAsync(TestFixture.TestWorkspaceId, columnId, termId))
-            .Returns(Task.CompletedTask);
+        fixture.BusinessTermService.Setup(s => s.MapToColumnAsync(TestFixture.TestWorkspaceId, TestFixture.TestParticipantId, columnId, termId))
+            .ReturnsAsync(new ColumnVersionDto(columnId, 5));
 
         var client = fixture.CreateAuthenticatedClient();
         var response = await client.PutAsJsonAsync($"/columns/{columnId}/business-term", new { termId });
 
-        // 204, not a bodyless 200 — there is nothing to return and the status should say so.
-        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
-        Assert.Equal(0, (await response.Content.ReadAsByteArrayAsync()).Length);
+        // This used to be a 204 on the grounds that there was nothing to return. Mapping a term
+        // moves the row's version, and a client that does not take the new one has its next edit
+        // to that row rejected as stale — so there is something to return after all.
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var result = await response.Content.ReadFromJsonAsync<ColumnVersionDto>(JsonOpts);
+        Assert.Equal(columnId, result!.ColumnId);
+        Assert.Equal(5, result.Version);
     }
 
     [Fact]
@@ -222,14 +227,14 @@ public class BusinessTermEndpointTests(TestFixture fixture) : IClassFixture<Test
 
         var columnId = Guid.NewGuid();
         var termId = Guid.NewGuid();
-        fixture.BusinessTermService.Setup(s => s.MapToColumnAsync(TestFixture.TestWorkspaceId, columnId, termId))
-            .Returns(Task.CompletedTask);
+        fixture.BusinessTermService.Setup(s => s.MapToColumnAsync(TestFixture.TestWorkspaceId, TestFixture.TestParticipantId, columnId, termId))
+            .ReturnsAsync(new ColumnVersionDto(columnId, 5));
 
         var client = fixture.CreateAuthenticatedClient();
         await client.PutAsJsonAsync($"/columns/{columnId}/business-term", new { termId });
 
         fixture.BusinessTermService.Verify(s => s.MapToColumnAsync(
-            TestFixture.TestWorkspaceId, columnId, termId), Times.Once);
+            TestFixture.TestWorkspaceId, TestFixture.TestParticipantId, columnId, termId), Times.Once);
     }
 
     [Fact]
@@ -237,7 +242,7 @@ public class BusinessTermEndpointTests(TestFixture fixture) : IClassFixture<Test
     {
         var columnId = Guid.NewGuid();
         fixture.BusinessTermService.Setup(s => s.MapToColumnAsync(
-            TestFixture.TestWorkspaceId, columnId, It.IsAny<Guid>()))
+            TestFixture.TestWorkspaceId, TestFixture.TestParticipantId, columnId, It.IsAny<Guid>()))
             .ThrowsAsync(new BusinessTermNotFoundException());
 
         var client = fixture.CreateAuthenticatedClient();
@@ -254,7 +259,7 @@ public class BusinessTermEndpointTests(TestFixture fixture) : IClassFixture<Test
     {
         var columnId = Guid.NewGuid();
         fixture.BusinessTermService.Setup(s => s.MapToColumnAsync(
-            TestFixture.TestWorkspaceId, columnId, It.IsAny<Guid>()))
+            TestFixture.TestWorkspaceId, TestFixture.TestParticipantId, columnId, It.IsAny<Guid>()))
             .ThrowsAsync(new ColumnNotFoundException());
 
         var client = fixture.CreateAuthenticatedClient();
@@ -268,16 +273,21 @@ public class BusinessTermEndpointTests(TestFixture fixture) : IClassFixture<Test
     // ── DELETE /columns/{columnId}/business-term ─────────────────────────────
 
     [Fact]
-    public async Task ClearColumnTerm_Returns204()
+    public async Task ClearColumnTerm_Returns200WithTheColumnsNewVersion()
     {
         var columnId = Guid.NewGuid();
-        fixture.BusinessTermService.Setup(s => s.UnmapFromColumnAsync(TestFixture.TestWorkspaceId, columnId))
-            .Returns(Task.CompletedTask);
+        fixture.BusinessTermService.Setup(s => s.UnmapFromColumnAsync(TestFixture.TestWorkspaceId, TestFixture.TestParticipantId, columnId))
+            .ReturnsAsync(new ColumnVersionDto(columnId, 5));
 
         var client = fixture.CreateAuthenticatedClient();
         var response = await client.DeleteAsync($"/columns/{columnId}/business-term");
 
-        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        // Clearing a term moves the row's version just as setting one does, so the response
+        // carries it rather than being an empty 204.
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var result = await response.Content.ReadFromJsonAsync<ColumnVersionDto>(JsonOpts);
+        Assert.Equal(5, result!.Version);
     }
 
     [Fact]
@@ -286,21 +296,21 @@ public class BusinessTermEndpointTests(TestFixture fixture) : IClassFixture<Test
         fixture.BusinessTermService.Invocations.Clear();
 
         var columnId = Guid.NewGuid();
-        fixture.BusinessTermService.Setup(s => s.UnmapFromColumnAsync(TestFixture.TestWorkspaceId, columnId))
-            .Returns(Task.CompletedTask);
+        fixture.BusinessTermService.Setup(s => s.UnmapFromColumnAsync(TestFixture.TestWorkspaceId, TestFixture.TestParticipantId, columnId))
+            .ReturnsAsync(new ColumnVersionDto(columnId, 5));
 
         var client = fixture.CreateAuthenticatedClient();
         await client.DeleteAsync($"/columns/{columnId}/business-term");
 
         fixture.BusinessTermService.Verify(s => s.UnmapFromColumnAsync(
-            TestFixture.TestWorkspaceId, columnId), Times.Once);
+            TestFixture.TestWorkspaceId, TestFixture.TestParticipantId, columnId), Times.Once);
     }
 
     [Fact]
     public async Task ClearColumnTerm_ColumnNotFound_Returns404()
     {
         var columnId = Guid.NewGuid();
-        fixture.BusinessTermService.Setup(s => s.UnmapFromColumnAsync(TestFixture.TestWorkspaceId, columnId))
+        fixture.BusinessTermService.Setup(s => s.UnmapFromColumnAsync(TestFixture.TestWorkspaceId, TestFixture.TestParticipantId, columnId))
             .ThrowsAsync(new ColumnNotFoundException());
 
         var client = fixture.CreateAuthenticatedClient();

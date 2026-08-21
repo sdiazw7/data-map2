@@ -140,10 +140,24 @@ public class ColumnRepository(AppDbContext db) : IColumnRepository
             .ToListAsync();
     }
 
-    public async Task SetBusinessTermAsync(Guid workspaceId, Guid columnId, Guid? businessTermId)
+    public async Task<bool> SetBusinessTermAsync(Column column, Guid? businessTermId)
     {
-        await db.Columns
-            .Where(c => c.WorkspaceId == workspaceId && c.Id == columnId)
-            .ExecuteUpdateAsync(s => s.SetProperty(c => c.BusinessTermId, businessTermId));
+        column.BusinessTermId = businessTermId;
+
+        // Mapping a term changes the row the grid holds, so it moves the concurrency token with
+        // it. This used to run as an ExecuteUpdate that set the term alone, which left every
+        // client holding a version the row no longer had and no record that anything happened.
+        column.Version++;
+        column.UpdatedAt = DateTime.UtcNow;
+
+        try
+        {
+            await db.SaveChangesAsync();
+            return true;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return false;
+        }
     }
 }

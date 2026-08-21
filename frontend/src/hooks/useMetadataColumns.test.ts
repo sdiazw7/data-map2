@@ -151,4 +151,34 @@ describe('useMetadataColumns.applyTerm', () => {
     expect(previous).toBe('Gross Revenue')
     expect(result.current.columns[0].businessTerm).toBeNull()
   })
+
+  it('takes the version the mapping returned, so the next edit to the row is not stale', async () => {
+    const { result } = await renderLoaded()
+
+    // Optimistic first, then confirmed with the version the server moved the row to.
+    act(() => {
+      result.current.applyTerm('c1', 'Gross Revenue')
+    })
+    expect(result.current.columns[0].version).toBe(1)
+
+    act(() => {
+      result.current.applyTerm('c1', 'Gross Revenue', 2)
+    })
+    expect(result.current.columns[0].version).toBe(2)
+    expect(result.current.columns[0].businessTerm).toBe('Gross Revenue')
+
+    // The next grid edit spends that version rather than the one the mapping retired.
+    vi.mocked(bulkUpdateColumns).mockResolvedValue({
+      columns: [{ columnId: 'c1', version: 3 }],
+      conflicts: [],
+    })
+
+    await act(async () => {
+      await result.current.editColumn('c1', { description: 'Updated' })
+    })
+
+    expect(vi.mocked(bulkUpdateColumns)).toHaveBeenCalledWith([
+      expect.objectContaining({ columnId: 'c1', version: 2 }),
+    ])
+  })
 })

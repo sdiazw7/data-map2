@@ -72,8 +72,11 @@ type UseMetadataColumnsResult = {
    * {@link ApiError} if the write failed, having already put the row back as it was.
    */
   editColumn: (columnId: string, edit: ColumnEdit) => Promise<void>
-  /** Sets a row's business term locally, returning the term it replaced so a failed write can undo it. */
-  applyTerm: (columnId: string, termName: string | null) => string | null
+  /**
+   * Sets a row's business term locally, returning the term it replaced so a failed write can
+   * undo it. Called again with the version the server returned once the write has landed.
+   */
+  applyTerm: (columnId: string, termName: string | null, version?: number) => string | null
 }
 
 export function useMetadataColumns(query: ColumnsQuery): UseMetadataColumnsResult {
@@ -347,9 +350,16 @@ export function useMetadataColumns(query: ColumnsQuery): UseMetadataColumnsResul
   )
 
   const applyTerm = useCallback(
-    (columnId: string, termName: string | null) => {
+    (columnId: string, termName: string | null, version?: number) => {
       const previous = rowsRef.current.find(row => row.columnId === columnId)?.businessTerm ?? null
-      patchRow(columnId, { businessTerm: termName })
+
+      const patch: Partial<ColumnGridRow> = { businessTerm: termName }
+
+      // Mapping a term moves the row's version server-side. Taking the new one here is what
+      // keeps the next grid edit to this row from spending a version already retired.
+      if (version !== undefined) patch.version = version
+
+      patchRow(columnId, patch)
       return previous
     },
     [patchRow],

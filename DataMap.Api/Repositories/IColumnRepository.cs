@@ -29,8 +29,10 @@ public interface IColumnRepository
     Task<List<Column>> GetAllByWorkspaceAsync(Guid workspaceId);
 
     /// <summary>
-    /// Sets the column's business term directly, bypassing the Version concurrency check —
-    /// term mapping is a separate action from a grid edit and was never gated by it.
+    /// Sets the column's business term and bumps its Version, which the caller reads back off
+    /// the entity. Returns false when the optimistic-concurrency check on Version rejected the
+    /// write. Takes the loaded column rather than an id: the caller has already read it to
+    /// find the term it is replacing, and that read is what the concurrency check compares to.
     /// </summary>
-    Task SetBusinessTermAsync(Guid workspaceId, Guid columnId, Guid? businessTermId);
+    Task<bool> SetBusinessTermAsync(Column column, Guid? businessTermId);
 }
