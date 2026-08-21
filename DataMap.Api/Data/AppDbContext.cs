@@ -46,6 +46,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             .HasIndex(b => new { b.WorkspaceId, b.Name })
             .IsUnique();
 
+        // A column carries at most one business term. The projection has a single
+        // BusinessTerm field, so a second mapping would fan the rebuild join out into
+        // two rows sharing one ColumnId — which is the projection's primary key.
+        modelBuilder.Entity<TermColumnMapping>()
+            .HasIndex(m => m.ColumnId)
+            .IsUnique();
+
         // Performance indexes not auto-created by EF
         modelBuilder.Entity<Invite>()
             .HasIndex(i => i.Token);
@@ -53,7 +60,21 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<MetadataChange>()
             .HasIndex(m => m.EntityId);
 
+        // One index per grid sort key. Each leads with WorkspaceId (every query filters
+        // on it) and trails with ColumnId (the pagination tie-breaker), so Postgres can
+        // serve filter + ORDER BY + LIMIT from a single index scan rather than sorting
+        // the workspace's entire row set on every page request. A standalone WorkspaceId
+        // index would be a redundant prefix of these.
         modelBuilder.Entity<ColumnCatalogEditor>()
-            .HasIndex(c => c.WorkspaceId);
+            .HasIndex(c => new { c.WorkspaceId, c.ColumnName, c.ColumnId });
+
+        modelBuilder.Entity<ColumnCatalogEditor>()
+            .HasIndex(c => new { c.WorkspaceId, c.TableName, c.ColumnId });
+
+        modelBuilder.Entity<ColumnCatalogEditor>()
+            .HasIndex(c => new { c.WorkspaceId, c.DataType, c.ColumnId });
+
+        modelBuilder.Entity<ColumnCatalogEditor>()
+            .HasIndex(c => new { c.WorkspaceId, c.Owner, c.ColumnId });
     }
 }

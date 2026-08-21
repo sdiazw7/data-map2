@@ -4,7 +4,10 @@ obj/
 *.user
 *.suo
 .vs/
-DataMap.Api/Migrations/
+
+# NOTE: DataMap.Api/Migrations/ is deliberately NOT ignored. Migrations are the
+# schema's source of truth — ignoring them leaves no reviewable, reproducible
+# record of the database structure for other machines or deployments.
 
 # Frontend
 frontend/node_modules/

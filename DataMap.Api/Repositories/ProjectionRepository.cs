@@ -31,10 +31,13 @@ public class ProjectionRepository(AppDbContext db) : IProjectionRepository
             "owner" => descending ? query.OrderByDescending(c => c.Owner) : query.OrderBy(c => c.Owner),
             _ => descending ? query.OrderByDescending(c => c.ColumnName) : query.OrderBy(c => c.ColumnName),
         };
-        // Tie-breaker keeps offset pagination deterministic across pages when the sort column repeats values.
-        query = ordered.ThenBy(c => c.ColumnId);
+        // Tie-breaker keeps offset pagination deterministic across pages when the sort column
+        // repeats values. It follows the sort direction so the ORDER BY matches a forward or
+        // backward walk of the composite index; a fixed-ascending tie-breaker on a descending
+        // sort would force Postgres to sort the whole result set instead.
+        query = descending ? ordered.ThenByDescending(c => c.ColumnId) : ordered.ThenBy(c => c.ColumnId);
 
-        return await query.Skip(offset).Take(limit).ToListAsync();
+        return await query.AsNoTracking().Skip(offset).Take(limit).ToListAsync();
     }
 
     public async Task<List<string>> GetDistinctTableNamesAsync(Guid workspaceId)
@@ -47,8 +50,42 @@ public class ProjectionRepository(AppDbContext db) : IProjectionRepository
             .ToListAsync();
     }
 
+    public async Task SyncColumnsAsync(Guid workspaceId, IReadOnlyCollection<Column> columns)
+    {
+        if (columns.Count == 0) return;
+
+        var columnIds = columns.Select(c => c.Id).ToList();
+        var rows = await db.ColumnCatalogEditor
+            .Where(r => r.WorkspaceId == workspaceId && columnIds.Contains(r.ColumnId))
+            .ToListAsync();
+
+        var columnsById = columns.ToDictionary(c => c.Id);
+        foreach (var row in rows)
+        {
+            var column = columnsById[row.ColumnId];
+            row.ExampleValue = column.ExampleValue;
+            row.Description = column.Description;
+            row.Owner = column.Owner;
+            row.Version = column.Version;
+        }
+
+        await db.SaveChangesAsync();
+    }
+
+    public async Task SyncColumnTermAsync(Guid workspaceId, Guid columnId, string? termName)
+    {
+        await db.ColumnCatalogEditor
+            .Where(r => r.WorkspaceId == workspaceId && r.ColumnId == columnId)
+            .ExecuteUpdateAsync(s => s.SetProperty(r => r.BusinessTerm, termName));
+    }
+
     public async Task RefreshAsync(Guid workspaceId)
     {
+        // Delete and reinsert must commit together. Without a transaction the delete is
+        // visible on its own, so concurrent readers see an empty catalog mid-rebuild, and
+        // a failed insert leaves the workspace's projection permanently empty.
+        await using var transaction = await db.Database.BeginTransactionAsync();
+
         await db.ColumnCatalogEditor
             .Where(c => c.WorkspaceId == workspaceId)
             .ExecuteDeleteAsync();
@@ -75,6 +112,8 @@ public class ProjectionRepository(AppDbContext db) : IProjectionRepository
             LEFT JOIN app.""BusinessTerms"" bt ON bt.""Id"" = tcm.""TermId""
             WHERE col.""WorkspaceId"" = {0}",
             workspaceId);
+
+        await transaction.CommitAsync();
     }
 
     public async Task<(int Total, int Documented)> GetCoverageCountsAsync(Guid workspaceId)

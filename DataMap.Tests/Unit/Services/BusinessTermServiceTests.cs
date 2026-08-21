@@ -11,13 +11,20 @@ namespace DataMap.Tests.Unit.Services;
 public class BusinessTermServiceTests
 {
     private readonly Mock<IBusinessTermRepository> _termRepo = new();
+    private readonly Mock<IColumnRepository> _columnRepo = new();
     private readonly Mock<IProjectionService> _projectionService = new();
     private readonly Mock<ILogger<BusinessTermService>> _logger = new();
 
     private BusinessTermService CreateService() => new(
         _termRepo.Object,
+        _columnRepo.Object,
         _projectionService.Object,
         _logger.Object);
+
+    /// <summary>Makes the column resolve inside the given workspace.</summary>
+    private void ColumnExists(Guid workspaceId, Guid columnId) =>
+        _columnRepo.Setup(r => r.GetByIdAsync(workspaceId, columnId))
+            .ReturnsAsync(new Column { Id = columnId, WorkspaceId = workspaceId });
 
     // ── GetAllAsync ──────────────────────────────────────────────────────────
 
@@ -139,6 +146,8 @@ public class BusinessTermServiceTests
         var term = new BusinessTerm { Id = termId, WorkspaceId = workspaceId };
 
         _termRepo.Setup(r => r.GetByIdAsync(termId)).ReturnsAsync(term);
+        ColumnExists(workspaceId, columnId);
+        _termRepo.Setup(r => r.GetMappingByColumnAsync(columnId)).ReturnsAsync((TermColumnMapping?)null);
         _termRepo.Setup(r => r.MapTermToColumnAsync(It.IsAny<TermColumnMapping>()))
             .ReturnsAsync(new TermColumnMapping { Id = Guid.NewGuid(), TermId = termId, ColumnId = columnId });
 
@@ -146,6 +155,42 @@ public class BusinessTermServiceTests
 
         _termRepo.Verify(r => r.MapTermToColumnAsync(It.Is<TermColumnMapping>(
             m => m.TermId == termId && m.ColumnId == columnId)), Times.Once);
+    }
+
+    [Fact]
+    public async Task MapToColumnAsync_ColumnAlreadyMapped_ReplacesExistingMappingInsteadOfInserting()
+    {
+        var workspaceId = Guid.NewGuid();
+        var termId = Guid.NewGuid();
+        var columnId = Guid.NewGuid();
+        var existing = new TermColumnMapping { Id = Guid.NewGuid(), TermId = Guid.NewGuid(), ColumnId = columnId };
+
+        _termRepo.Setup(r => r.GetByIdAsync(termId)).ReturnsAsync(new BusinessTerm { Id = termId, WorkspaceId = workspaceId });
+        ColumnExists(workspaceId, columnId);
+        _termRepo.Setup(r => r.GetMappingByColumnAsync(columnId)).ReturnsAsync(existing);
+
+        await CreateService().MapToColumnAsync(workspaceId, new TermMappingRequest(termId, columnId));
+
+        // A second insert would produce two projection rows sharing one ColumnId — the
+        // projection's primary key — and break every later rebuild for the workspace.
+        _termRepo.Verify(r => r.MapTermToColumnAsync(It.IsAny<TermColumnMapping>()), Times.Never);
+        _termRepo.Verify(r => r.UpdateMappingAsync(It.Is<TermColumnMapping>(m => m.TermId == termId)), Times.Once);
+    }
+
+    [Fact]
+    public async Task MapToColumnAsync_ColumnInDifferentWorkspace_ThrowsValidationException()
+    {
+        var workspaceId = Guid.NewGuid();
+        var termId = Guid.NewGuid();
+        var columnId = Guid.NewGuid();
+
+        _termRepo.Setup(r => r.GetByIdAsync(termId)).ReturnsAsync(new BusinessTerm { Id = termId, WorkspaceId = workspaceId });
+        _columnRepo.Setup(r => r.GetByIdAsync(workspaceId, columnId)).ReturnsAsync((Column?)null);
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            CreateService().MapToColumnAsync(workspaceId, new TermMappingRequest(termId, columnId)));
+
+        _termRepo.Verify(r => r.MapTermToColumnAsync(It.IsAny<TermColumnMapping>()), Times.Never);
     }
 
     [Fact]
@@ -173,24 +218,27 @@ public class BusinessTermServiceTests
     }
 
     [Fact]
-    public async Task MapToColumnAsync_RefreshesProjectionAfterMapping()
+    public async Task MapToColumnAsync_SyncsOnlyTheAffectedProjectionRow()
     {
         var workspaceId = Guid.NewGuid();
         var termId = Guid.NewGuid();
         var columnId = Guid.NewGuid();
-        var term = new BusinessTerm { Id = termId, WorkspaceId = workspaceId };
+        var term = new BusinessTerm { Id = termId, WorkspaceId = workspaceId, Name = "Revenue" };
 
         _termRepo.Setup(r => r.GetByIdAsync(termId)).ReturnsAsync(term);
+        ColumnExists(workspaceId, columnId);
+        _termRepo.Setup(r => r.GetMappingByColumnAsync(columnId)).ReturnsAsync((TermColumnMapping?)null);
         _termRepo.Setup(r => r.MapTermToColumnAsync(It.IsAny<TermColumnMapping>()))
             .ReturnsAsync(new TermColumnMapping { Id = Guid.NewGuid() });
 
         await CreateService().MapToColumnAsync(workspaceId, new TermMappingRequest(termId, columnId));
 
-        _projectionService.Verify(p => p.RefreshAsync(workspaceId), Times.Once);
+        _projectionService.Verify(p => p.SyncColumnTermAsync(workspaceId, columnId, "Revenue"), Times.Once);
+        _projectionService.Verify(p => p.RefreshAsync(It.IsAny<Guid>()), Times.Never);
     }
 
     [Fact]
-    public async Task MapToColumnAsync_DoesNotRefreshProjectionOnValidationFailure()
+    public async Task MapToColumnAsync_DoesNotTouchProjectionOnValidationFailure()
     {
         var workspaceId = Guid.NewGuid();
         var termId = Guid.NewGuid();
@@ -200,5 +248,6 @@ public class BusinessTermServiceTests
             CreateService().MapToColumnAsync(workspaceId, new TermMappingRequest(termId, Guid.NewGuid())));
 
         _projectionService.Verify(p => p.RefreshAsync(It.IsAny<Guid>()), Times.Never);
+        _projectionService.Verify(p => p.SyncColumnTermAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string?>()), Times.Never);
     }
 }

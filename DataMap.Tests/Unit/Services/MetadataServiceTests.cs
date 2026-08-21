@@ -346,7 +346,7 @@ public class MetadataServiceTests
     }
 
     [Fact]
-    public async Task BulkUpdateAsync_RefreshesProjection()
+    public async Task BulkUpdateAsync_SyncsOnlyTheUpdatedColumns()
     {
         var workspaceId = Guid.NewGuid();
         var columnId = Guid.NewGuid();
@@ -357,7 +357,37 @@ public class MetadataServiceTests
         await CreateService().BulkUpdateAsync(workspaceId, Guid.NewGuid(),
             [new ColumnUpdateRequest(columnId, "new", null, null, 1)]);
 
-        _projectionService.Verify(p => p.RefreshAsync(workspaceId), Times.Once);
+        _projectionService.Verify(p => p.SyncColumnsAsync(workspaceId,
+            It.Is<IReadOnlyCollection<Column>>(c => c.Count == 1 && c.Single().Id == columnId)), Times.Once);
+    }
+
+    [Fact]
+    public async Task BulkUpdateAsync_NeverRebuildsWholeProjection()
+    {
+        var workspaceId = Guid.NewGuid();
+        var columnId = Guid.NewGuid();
+        var column = new Column { Id = columnId, Version = 1, Description = "old" };
+        _columnRepo.Setup(r => r.GetByIdAsync(workspaceId, columnId)).ReturnsAsync(column);
+        _columnRepo.Setup(r => r.UpdateAsync(It.IsAny<Column>())).ReturnsAsync(true);
+
+        await CreateService().BulkUpdateAsync(workspaceId, Guid.NewGuid(),
+            [new ColumnUpdateRequest(columnId, "new", null, null, 1)]);
+
+        _projectionService.Verify(p => p.RefreshAsync(It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task BulkUpdateAsync_ColumnNotFound_ExcludedFromProjectionSync()
+    {
+        var workspaceId = Guid.NewGuid();
+        var missingId = Guid.NewGuid();
+        _columnRepo.Setup(r => r.GetByIdAsync(workspaceId, missingId)).ReturnsAsync((Column?)null);
+
+        await CreateService().BulkUpdateAsync(workspaceId, Guid.NewGuid(),
+            [new ColumnUpdateRequest(missingId, null, null, null, 0)]);
+
+        _projectionService.Verify(p => p.SyncColumnsAsync(workspaceId,
+            It.Is<IReadOnlyCollection<Column>>(c => c.Count == 0)), Times.Once);
     }
 
     // ── GetCoverageAsync ─────────────────────────────────────────────────────

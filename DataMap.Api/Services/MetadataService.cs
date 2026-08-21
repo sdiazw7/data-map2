@@ -99,6 +99,7 @@ public class MetadataService(
     public async Task BulkUpdateAsync(Guid workspaceId, Guid participantId, List<ColumnUpdateRequest> updates)
     {
         var changes = new List<MetadataChange>();
+        var updatedColumns = new List<Column>();
         var now = DateTime.UtcNow;
 
         foreach (var update in updates)
@@ -167,12 +168,15 @@ public class MetadataService(
             column.UpdatedAt = now;
 
             await columnRepo.UpdateAsync(column);
+            updatedColumns.Add(column);
         }
 
         if (changes.Count > 0)
             await changeRepo.AddRangeAsync(changes);
 
-        await projectionService.RefreshAsync(workspaceId);
+        // Sync only the rows that changed. Rebuilding the whole projection here would cost
+        // a full delete + reinsert of the workspace on every keystroke-level edit.
+        await projectionService.SyncColumnsAsync(workspaceId, updatedColumns);
     }
 
     public async Task<CoverageResponse> GetCoverageAsync(Guid workspaceId)

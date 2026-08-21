@@ -8,6 +8,7 @@ namespace DataMap.Api.Services;
 
 public class BusinessTermService(
     IBusinessTermRepository termRepo,
+    IColumnRepository columnRepo,
     IProjectionService projectionService,
     ILogger<BusinessTermService> logger) : BaseService(logger), IBusinessTermService
 {
@@ -45,19 +46,33 @@ public class BusinessTermService(
         if (term is null || term.WorkspaceId != workspaceId)
             throw new ValidationException("Business term not found.");
 
-        var mapping = new TermColumnMapping
-        {
-            Id = Guid.NewGuid(),
-            TermId = request.TermId,
-            ColumnId = request.ColumnId
-        };
+        // Scope the column to the caller's workspace. Without this a participant could map
+        // their term onto another workspace's column and corrupt that workspace's projection.
+        var column = await columnRepo.GetByIdAsync(workspaceId, request.ColumnId);
+        if (column is null)
+            throw new ValidationException("Column not found.");
 
-        await termRepo.MapTermToColumnAsync(mapping);
+        // A column holds at most one term, so remapping replaces the existing mapping.
+        var existing = await termRepo.GetMappingByColumnAsync(request.ColumnId);
+        if (existing is not null)
+        {
+            existing.TermId = request.TermId;
+            await termRepo.UpdateMappingAsync(existing);
+        }
+        else
+        {
+            await termRepo.MapTermToColumnAsync(new TermColumnMapping
+            {
+                Id = Guid.NewGuid(),
+                TermId = request.TermId,
+                ColumnId = request.ColumnId
+            });
+        }
 
         Logger.LogInformation(
             "Term {TermId} mapped to column {ColumnId} in workspace {WorkspaceId}",
             request.TermId, request.ColumnId, workspaceId);
 
-        await projectionService.RefreshAsync(workspaceId);
+        await projectionService.SyncColumnTermAsync(workspaceId, request.ColumnId, term.Name);
     }
 }

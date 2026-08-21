@@ -1,7 +1,9 @@
 using DataMap.Api.Middleware;
 using DataMap.Api.Models;
 using DataMap.Api.Repositories;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Hosting;
 using Moq;
 using System.Text.Json;
 
@@ -10,6 +12,13 @@ namespace DataMap.Tests.Unit.Middleware;
 public class SessionAuthMiddlewareTests
 {
     private readonly Mock<ISessionRepository> _sessionRepo = new();
+    private readonly Mock<IWebHostEnvironment> _env = new();
+
+    public SessionAuthMiddlewareTests()
+    {
+        // Non-Development, so the /dev path bypass stays inert for these tests.
+        _env.SetupGet(e => e.EnvironmentName).Returns(Environments.Production);
+    }
 
     private async Task<(int StatusCode, string Body, HttpContext Context, bool NextCalled)> InvokeAsync(
         string path = "/metadata/columns",
@@ -26,7 +35,7 @@ public class SessionAuthMiddlewareTests
         RequestDelegate next = _ => { nextCalled = true; return Task.CompletedTask; };
 
         var middleware = new SessionAuthMiddleware(next);
-        await middleware.InvokeAsync(context, _sessionRepo.Object);
+        await middleware.InvokeAsync(context, _sessionRepo.Object, _env.Object);
 
         context.Response.Body.Seek(0, SeekOrigin.Begin);
         var body = await new StreamReader(context.Response.Body).ReadToEndAsync();
@@ -186,7 +195,7 @@ public class SessionAuthMiddlewareTests
         context.Request.Path = "/metadata/columns";
 
         var middleware = new SessionAuthMiddleware(_ => Task.CompletedTask);
-        await middleware.InvokeAsync(context, _sessionRepo.Object);
+        await middleware.InvokeAsync(context, _sessionRepo.Object, _env.Object);
 
         Assert.Equal("application/json", context.Response.ContentType);
     }

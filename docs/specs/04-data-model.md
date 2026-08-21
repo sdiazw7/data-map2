@@ -83,6 +83,12 @@ Column `version` is used for optimistic concurrency control. `PATCH` requests mu
 - term_id
 - column_id
 
+Unique constraint: `(column_id)` — a column carries at most one business term. The
+projection holds a single `business_term` field, so a second mapping would fan the
+rebuild's `LEFT JOIN` out into two rows sharing one `column_id`, which is the
+projection's primary key. Mapping a term to an already-mapped column replaces the
+existing mapping.
+
 **metadata_changes**
 - id
 - entity_type

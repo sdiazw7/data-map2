@@ -27,7 +27,13 @@ Upserts are workspace-scoped and keyed by name — a schema, table, or column wi
 
 ## 2. Projection Refresh Strategy
 
-When metadata changes occur:
+The projection has two maintenance paths. Which one applies depends on whether the
+change alters the *structure* of the catalog or only the *contents* of existing rows.
+
+### Full rebuild — structural changes only
+
+Used by CSV upload, workspace copy, and demo seeding, where rows are added or removed
+wholesale:
 
 ```sql
 DELETE FROM column_catalog_editor
@@ -42,4 +48,23 @@ LEFT JOIN term_column_mapping
 LEFT JOIN business_terms
 ```
 
-`ProjectionService.RefreshAsync` is the single entry point used by all callers (CSV upload, bulk column update, business term mapping, workspace copy, demo seeding).
+The delete and the insert MUST run in one transaction. Committed separately, the delete
+becomes visible on its own — concurrent readers see an empty catalog mid-rebuild, and a
+failed insert leaves the workspace's projection permanently empty.
+
+Entry point: `ProjectionService.RefreshAsync`.
+
+### Targeted sync — edits to existing rows
+
+Used by bulk column update and business term mapping. These change field values on rows
+that already exist, so they update those rows in place instead of rebuilding.
+
+A full rebuild here would not scale: with 100k+ columns in a workspace, every
+optimistically-saved cell edit would cost a 100k-row delete plus a 100k-row reinsert
+across a five-table join. Targeted sync makes the cost proportional to the number of
+rows actually edited.
+
+Entry points: `ProjectionService.SyncColumnsAsync` (description, example value, owner,
+version) and `ProjectionService.SyncColumnTermAsync` (business term).
+
+Never call `RefreshAsync` from an edit path.

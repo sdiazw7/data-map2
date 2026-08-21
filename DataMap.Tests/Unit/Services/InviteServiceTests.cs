@@ -14,6 +14,8 @@ public class InviteServiceTests
     private readonly Mock<IInviteRepository> _inviteRepo = new();
     private readonly Mock<IParticipantRepository> _participantRepo = new();
     private readonly Mock<ISessionRepository> _sessionRepo = new();
+    private readonly Mock<IWorkspaceRepository> _workspaceRepo = new();
+    private readonly Mock<IWorkspaceCopyService> _workspaceCopyService = new();
     private readonly Mock<IHttpContextAccessor> _httpContextAccessor = new();
     private readonly Mock<ILogger<InviteService>> _logger = new();
 
@@ -21,6 +23,8 @@ public class InviteServiceTests
         _inviteRepo.Object,
         _participantRepo.Object,
         _sessionRepo.Object,
+        _workspaceRepo.Object,
+        _workspaceCopyService.Object,
         _httpContextAccessor.Object,
         _logger.Object);
 
@@ -104,17 +108,20 @@ public class InviteServiceTests
     public async Task JoinAsync_NewParticipant_ReturnsJoinResponse()
     {
         var invite = MakeInvite();
-        var created = new Participant { Id = Guid.NewGuid(), WorkspaceId = invite.WorkspaceId, Email = "new@example.com", InviteId = invite.Id };
+        Participant? created = null;
 
         _inviteRepo.Setup(r => r.GetByTokenAsync("token")).ReturnsAsync(invite);
         _participantRepo.Setup(r => r.GetByWorkspaceAndEmailAsync(invite.WorkspaceId, "new@example.com")).ReturnsAsync((Participant?)null);
-        _participantRepo.Setup(r => r.CreateAsync(It.IsAny<Participant>())).ReturnsAsync(created);
+        // Real repositories persist and return the same instance they were handed.
+        _participantRepo.Setup(r => r.CreateAsync(It.IsAny<Participant>()))
+            .Callback<Participant>(p => created = p)
+            .ReturnsAsync((Participant p) => p);
         _sessionRepo.Setup(r => r.CreateAsync(It.IsAny<ParticipantSession>())).ReturnsAsync(new ParticipantSession { Id = Guid.NewGuid() });
         _httpContextAccessor.Setup(a => a.HttpContext).Returns(new DefaultHttpContext());
 
         var result = await CreateService().JoinAsync("token", new JoinRequest("new@example.com"));
 
-        Assert.Equal(created.Id, result.ParticipantId);
+        Assert.Equal(created!.Id, result.ParticipantId);
         Assert.Equal(invite.WorkspaceId, result.WorkspaceId);
         Assert.Equal("Test Workspace", result.WorkspaceName);
         Assert.Equal("new@example.com", result.Email);
