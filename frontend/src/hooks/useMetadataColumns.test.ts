@@ -1,6 +1,6 @@
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import type { ColumnGridRow } from '../types/api'
+import type { BulkUpdateResponse, ColumnGridRow } from '../types/api'
 import { useMetadataColumns } from './useMetadataColumns'
 import { getColumns, bulkUpdateColumns } from '../services/metadataService'
 import { ApiError, ApiErrorCode } from '../utils/api'
@@ -47,7 +47,7 @@ describe('useMetadataColumns.editColumn', () => {
 
   it('shows the edit before the server confirms it, then takes the new version', async () => {
     const { result } = await renderLoaded()
-    const write = deferred<{ columns: { columnId: string; version: number }[] }>()
+    const write = deferred<BulkUpdateResponse>()
     vi.mocked(bulkUpdateColumns).mockReturnValue(write.promise)
 
     let edit!: Promise<void>
@@ -67,7 +67,7 @@ describe('useMetadataColumns.editColumn', () => {
     )
 
     await act(async () => {
-      write.resolve({ columns: [{ columnId: 'c1', version: 2 }] })
+      write.resolve({ columns: [{ columnId: 'c1', version: 2 }], conflicts: [] })
       await edit
     })
 
@@ -108,7 +108,7 @@ describe('useMetadataColumns.editColumn', () => {
 
   it('rolls back only the fields it changed, leaving a term mapped mid-flight in place', async () => {
     const { result } = await renderLoaded()
-    const write = deferred<{ columns: { columnId: string; version: number }[] }>()
+    const write = deferred<BulkUpdateResponse>()
     vi.mocked(bulkUpdateColumns).mockReturnValue(write.promise)
 
     let edit!: Promise<void>

@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { BulkUpdateResponse, ColumnGridRow, ColumnUpdateRequest } from '../types/api'
 import { useMetadataColumns, PAGE_SIZE } from './useMetadataColumns'
 import { getColumns, bulkUpdateColumns } from '../services/metadataService'
-import { ApiError } from '../utils/api'
+import { ApiError, ApiErrorCode } from '../utils/api'
 
 vi.mock('../services/metadataService', () => ({
   getColumns: vi.fn(),
@@ -91,7 +91,7 @@ describe('useMetadataColumns write queue', () => {
     expect(writes).toHaveLength(1)
 
     await act(async () => {
-      writes[0].settle.resolve({ columns: [{ columnId: 'c1', version: 2 }] })
+      writes[0].settle.resolve({ columns: [{ columnId: 'c1', version: 2 }], conflicts: [] })
       await first
     })
 
@@ -107,7 +107,7 @@ describe('useMetadataColumns write queue', () => {
     ])
 
     await act(async () => {
-      writes[1].settle.resolve({ columns: [{ columnId: 'c1', version: 3 }] })
+      writes[1].settle.resolve({ columns: [{ columnId: 'c1', version: 3 }], conflicts: [] })
       await second
     })
 
@@ -169,6 +169,85 @@ describe('useMetadataColumns write queue', () => {
     expect(await two).toBe(failure)
     expect(result.current.columns[0].description).toBe('Description c1')
     expect(result.current.columns[1].description).toBe('Description c2')
+  })
+
+  it('keeps the applied rows of a batch and puts back only the ones reported stale', async () => {
+    const { result } = await renderLoaded()
+
+    let applied!: Promise<unknown>
+    let declined!: Promise<unknown>
+    act(() => {
+      applied = result.current.editColumn('c1', { description: 'Mine' }).then(
+        () => 'resolved',
+        e => e,
+      )
+      declined = result.current.editColumn('c2', { description: 'Mine too' }).then(
+        () => 'resolved',
+        e => e,
+      )
+    })
+
+    await waitFor(() => expect(writes).toHaveLength(1))
+
+    // What the rows look like once the server has taken one edit and rejected the other. The
+    // conflict sends the grid back for that row's page, and both rows share one.
+    vi.mocked(getColumns).mockImplementation(async () => ({
+      items: [
+        makeRow('c1', { description: 'Mine', version: 2 }),
+        makeRow('c2', { description: 'Theirs', version: 9 }),
+      ],
+      total: 2,
+      limit: PAGE_SIZE,
+      offset: 0,
+    }))
+
+    // The server took one row and declined the other. One cell that moved under the user must
+    // not undo the rest of what was pasted.
+    await act(async () => {
+      writes[0].settle.resolve({
+        columns: [{ columnId: 'c1', version: 2 }],
+        conflicts: [{ columnId: 'c2', currentVersion: 9 }],
+      })
+      await Promise.all([applied, declined])
+    })
+
+    expect(result.current.columns[0].description).toBe('Mine')
+    expect(result.current.columns[0].version).toBe(2)
+
+    // The declined row shows the winning value, not the edit that lost to it.
+    await waitFor(() => expect(result.current.columns[1].description).toBe('Theirs'))
+    expect(result.current.columns[1].version).toBe(9)
+
+    // The declined row's caller still learns its edit did not land, as the same failure a
+    // whole-batch conflict produces — so the grid reports it the same way.
+    expect(await applied).toBe('resolved')
+    const error = await declined
+    expect(error).toBeInstanceOf(ApiError)
+    expect((error as ApiError).code).toBe(ApiErrorCode.VersionConflict)
+  })
+
+  it('refetches the page of a row reported stale, so it stops carrying an unusable version', async () => {
+    const { result } = await renderLoaded()
+    const loadsBefore = vi.mocked(getColumns).mock.calls.length
+
+    let declined!: Promise<unknown>
+    act(() => {
+      declined = result.current.editColumn('c2', { description: 'Mine' }).catch(e => e)
+    })
+
+    await waitFor(() => expect(writes).toHaveLength(1))
+
+    await act(async () => {
+      writes[0].settle.resolve({
+        columns: [],
+        conflicts: [{ columnId: 'c2', currentVersion: 9 }],
+      })
+      await declined
+    })
+
+    await waitFor(() =>
+      expect(vi.mocked(getColumns).mock.calls.length).toBe(loadsBefore + 1),
+    )
   })
 
   it('keeps a queued edit on screen when the write it was typed over fails', async () => {

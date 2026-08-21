@@ -71,13 +71,18 @@ public class MetadataService(
     {
         ValidateUpdates(updates);
 
-        // Read and check every target before writing any of them. The repositories each commit
-        // on their own, so a version conflict discovered mid-write used to leave the earlier
-        // columns saved while their audit records and projection sync were dropped on the throw.
+        // Read every target in one query, then decide row by row. The repositories each commit
+        // on their own, so applying as the loop ran used to leave columns saved while their
+        // audit records and projection sync were dropped on a later throw.
         var columns = await columnRepo.GetByIdsAsync(
             workspaceId,
             updates.Select(u => u.ColumnId).ToList());
         var columnsById = columns.ToDictionary(c => c.Id);
+
+        var now = DateTime.UtcNow;
+        var changes = new List<MetadataChange>();
+        var edited = new List<Column>();
+        var conflicts = new List<ColumnConflictDto>();
 
         foreach (var update in updates)
         {
@@ -89,42 +94,53 @@ public class MetadataService(
                 continue;
             }
 
+            // A stale row is reported, not thrown. One cell that moved under the user must not
+            // discard the rest of a pasted range. Nothing is applied to it, so the client can
+            // roll back that cell alone and leave the others showing what was saved.
             if (column.Version != update.Version)
-                throw new VersionConflictException();
-        }
-
-        var now = DateTime.UtcNow;
-        var changes = new List<MetadataChange>();
-        var edited = new List<Column>();
-
-        foreach (var update in updates)
-        {
-            if (!columnsById.TryGetValue(update.ColumnId, out var column)) continue;
+            {
+                conflicts.Add(new ColumnConflictDto(column.Id, column.Version));
+                continue;
+            }
 
             changes.AddRange(ApplyUpdate(column, update, participantId, now));
             edited.Add(column);
         }
 
-        await unitOfWork.ExecuteAsync(async () =>
+        // Nothing survived the version check, so there is no work to open a transaction for.
+        if (edited.Count > 0)
         {
-            // The Version check above is a read-then-write, so it cannot see a writer that
-            // commits in between. Version is also an EF concurrency token, which puts the
-            // value that was read into the UPDATE's WHERE clause and makes the database
-            // reject the losing write instead of silently overwriting the winner.
-            if (!await columnRepo.UpdateRangeAsync(edited))
-                throw new VersionConflictException();
+            await unitOfWork.ExecuteAsync(async () =>
+            {
+                // The Version check above is a read-then-write, so it cannot see a writer that
+                // commits in between. Version is also an EF concurrency token, which puts the
+                // value that was read into the UPDATE's WHERE clause and makes the database
+                // reject the losing write instead of silently overwriting the winner. That
+                // rejection cannot say which row lost, so the batch fails whole rather than
+                // reporting a conflict it would have to guess at.
+                if (!await columnRepo.UpdateRangeAsync(edited))
+                    throw new VersionConflictException();
 
-            if (changes.Count > 0)
-                await changeRepo.AddRangeAsync(changes);
+                if (changes.Count > 0)
+                    await changeRepo.AddRangeAsync(changes);
 
-            // Sync only the rows that changed. Rebuilding the whole projection here would cost
-            // a full delete + reinsert of the workspace on every keystroke-level edit.
-            await projectionService.SyncColumnsAsync(workspaceId, edited);
-        });
+                // Sync only the rows that changed. Rebuilding the whole projection here would
+                // cost a full delete + reinsert of the workspace on every keystroke-level edit.
+                await projectionService.SyncColumnsAsync(workspaceId, edited);
+            });
+        }
+
+        if (conflicts.Count > 0)
+        {
+            Logger.LogInformation(
+                "Bulk update in workspace {WorkspaceId} applied {AppliedCount} columns and declined {ConflictCount} as stale",
+                workspaceId, edited.Count, conflicts.Count);
+        }
 
         // Read after the commit: these are the versions a caller must send with its next edit.
         return new BulkUpdateResponse(
-            edited.Select(c => new ColumnVersionDto(c.Id, c.Version)).ToList());
+            edited.Select(c => new ColumnVersionDto(c.Id, c.Version)).ToList(),
+            conflicts);
     }
 
     public async Task<CoverageResponse> GetCoverageAsync(Guid workspaceId)

@@ -205,23 +205,33 @@ public class MetadataServiceTests
     // ── BulkUpdateAsync ──────────────────────────────────────────────────────
 
     [Fact]
-    public async Task BulkUpdateAsync_VersionConflict_ThrowsVersionConflictException()
+    public async Task BulkUpdateAsync_StaleColumn_ReportsConflictWithTheVersionItHoldsNow()
     {
         var workspaceId = Guid.NewGuid();
         var columnId = Guid.NewGuid();
         SetupColumns(workspaceId, new Column { Id = columnId, Version = 2 });
 
-        await Assert.ThrowsAsync<VersionConflictException>(() =>
-            CreateService().BulkUpdateAsync(workspaceId, Guid.NewGuid(),
-                [new ColumnUpdateRequest(columnId, "desc", null, null, 1)])); // version 1 != 2
+        var result = await CreateService().BulkUpdateAsync(workspaceId, Guid.NewGuid(),
+            [new ColumnUpdateRequest(columnId, "desc", null, null, 1)]); // version 1 != 2
+
+        // Reported rather than thrown, and with the winning version, so the client can put that
+        // one cell back without refetching the grid to find out what it should say.
+        Assert.Empty(result.Columns);
+        var conflict = Assert.Single(result.Conflicts);
+        Assert.Equal(columnId, conflict.ColumnId);
+        Assert.Equal(2, conflict.CurrentVersion);
+
+        // Nothing survived the version check, so there was nothing to open a transaction for.
+        _unitOfWork.Verify(u => u.ExecuteAsync(It.IsAny<Func<Task>>()), Times.Never);
     }
 
     [Fact]
-    public async Task BulkUpdateAsync_StaleColumnLaterInBatch_WritesNothingAtAll()
+    public async Task BulkUpdateAsync_StaleColumnLaterInBatch_AppliesTheFreshRowsAndReportsTheStaleOne()
     {
-        // The regression this guards: writes used to commit per column as the loop ran, so a
-        // conflict on a later row left the earlier rows saved with no audit trail and a stale
-        // projection — which then rejected every subsequent edit to those cells.
+        // One cell that moved under the user must not discard the rest of a pasted range. What
+        // this still guards: writes used to commit per column as the loop ran, so the rows that
+        // did apply could land with no audit trail and a stale projection — which then rejected
+        // every subsequent edit to those cells.
         var workspaceId = Guid.NewGuid();
         var freshId = Guid.NewGuid();
         var staleId = Guid.NewGuid();
@@ -229,36 +239,47 @@ public class MetadataServiceTests
             new Column { Id = freshId, Version = 1, Description = "old" },
             new Column { Id = staleId, Version = 7, Description = "old" });
 
-        await Assert.ThrowsAsync<VersionConflictException>(() =>
-            CreateService().BulkUpdateAsync(workspaceId, Guid.NewGuid(),
-            [
-                new ColumnUpdateRequest(freshId, "new", null, null, 1),
-                new ColumnUpdateRequest(staleId, "new", null, null, 3) // stale
-            ]));
+        var result = await CreateService().BulkUpdateAsync(workspaceId, Guid.NewGuid(),
+        [
+            new ColumnUpdateRequest(freshId, "new", null, null, 1),
+            new ColumnUpdateRequest(staleId, "new", null, null, 3) // stale
+        ]);
 
-        _columnRepo.Verify(r => r.UpdateRangeAsync(It.IsAny<IReadOnlyCollection<Column>>()), Times.Never);
-        _changeRepo.Verify(r => r.AddRangeAsync(It.IsAny<IEnumerable<MetadataChange>>()), Times.Never);
-        _projectionService.Verify(p => p.SyncColumnsAsync(It.IsAny<Guid>(), It.IsAny<IReadOnlyCollection<Column>>()), Times.Never);
+        Assert.Equal(freshId, Assert.Single(result.Columns).ColumnId);
+        Assert.Equal(staleId, Assert.Single(result.Conflicts).ColumnId);
+
+        // The applied row, its audit record and its projection sync all go together or not at all.
+        _columnRepo.Verify(r => r.UpdateRangeAsync(
+            It.Is<IReadOnlyCollection<Column>>(c => c.Count == 1 && c.Single().Id == freshId)), Times.Once);
+        _changeRepo.Verify(r => r.AddRangeAsync(It.Is<IEnumerable<MetadataChange>>(
+            changes => changes.All(c => c.EntityId == freshId))), Times.Once);
+        _projectionService.Verify(p => p.SyncColumnsAsync(workspaceId,
+            It.Is<IReadOnlyCollection<Column>>(c => c.Count == 1 && c.Single().Id == freshId)), Times.Once);
     }
 
     [Fact]
-    public async Task BulkUpdateAsync_StaleColumnLaterInBatch_LeavesEarlierColumnUntouched()
+    public async Task BulkUpdateAsync_StaleColumnLaterInBatch_LeavesThatColumnExactlyAsItWas()
     {
         var workspaceId = Guid.NewGuid();
         var freshId = Guid.NewGuid();
         var staleId = Guid.NewGuid();
         var fresh = new Column { Id = freshId, Version = 1, Description = "old" };
-        SetupColumns(workspaceId, fresh, new Column { Id = staleId, Version = 7 });
+        var stale = new Column { Id = staleId, Version = 7, Description = "old" };
+        SetupColumns(workspaceId, fresh, stale);
 
-        await Assert.ThrowsAsync<VersionConflictException>(() =>
-            CreateService().BulkUpdateAsync(workspaceId, Guid.NewGuid(),
-            [
-                new ColumnUpdateRequest(freshId, "new", null, null, 1),
-                new ColumnUpdateRequest(staleId, "new", null, null, 3)
-            ]));
+        await CreateService().BulkUpdateAsync(workspaceId, Guid.NewGuid(),
+        [
+            new ColumnUpdateRequest(freshId, "new", null, null, 1),
+            new ColumnUpdateRequest(staleId, "new", null, null, 3)
+        ]);
 
-        Assert.Equal(1, fresh.Version);
-        Assert.Equal("old", fresh.Description);
+        // The declined row keeps the winner's values and its version, so the row the client
+        // refetches is the one the database already holds.
+        Assert.Equal(7, stale.Version);
+        Assert.Equal("old", stale.Description);
+
+        Assert.Equal(2, fresh.Version);
+        Assert.Equal("new", fresh.Description);
     }
 
     [Fact]
@@ -284,11 +305,14 @@ public class MetadataServiceTests
         var missingId = Guid.NewGuid();
         SetupColumns(workspaceId);
 
-        await CreateService().BulkUpdateAsync(workspaceId, Guid.NewGuid(),
+        var result = await CreateService().BulkUpdateAsync(workspaceId, Guid.NewGuid(),
             [new ColumnUpdateRequest(missingId, null, null, null, 0)]);
 
-        _columnRepo.Verify(r => r.UpdateRangeAsync(
-            It.Is<IReadOnlyCollection<Column>>(c => c.Count == 0)), Times.Once);
+        // A row that is not there is neither applied nor a conflict — there is no version to
+        // disagree about — so the request succeeds having done nothing.
+        Assert.Empty(result.Columns);
+        Assert.Empty(result.Conflicts);
+        _columnRepo.Verify(r => r.UpdateRangeAsync(It.IsAny<IReadOnlyCollection<Column>>()), Times.Never);
     }
 
     [Fact]
@@ -446,8 +470,10 @@ public class MetadataServiceTests
         await CreateService().BulkUpdateAsync(workspaceId, Guid.NewGuid(),
             [new ColumnUpdateRequest(missingId, null, null, null, 0)]);
 
-        _projectionService.Verify(p => p.SyncColumnsAsync(workspaceId,
-            It.Is<IReadOnlyCollection<Column>>(c => c.Count == 0)), Times.Once);
+        // Nothing was applied, so the projection is not touched at all — it used to be handed an
+        // empty collection, which cost a transaction to synchronise nothing.
+        _projectionService.Verify(p => p.SyncColumnsAsync(
+            It.IsAny<Guid>(), It.IsAny<IReadOnlyCollection<Column>>()), Times.Never);
     }
 
     [Fact]

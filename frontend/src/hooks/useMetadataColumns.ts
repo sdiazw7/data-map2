@@ -16,6 +16,19 @@ function touchedFields(edit: ColumnEdit): EditableField[] {
 }
 
 /**
+ * What a caller sees when the server declined its row as stale. The batch itself succeeded, so
+ * there is no thrown error to hand on — but the caller of this one row still has to learn that
+ * its edit did not land, and to learn it as the same failure a whole-batch conflict produces.
+ */
+function versionConflictError(): ApiError {
+  return new ApiError(
+    409,
+    ApiErrorCode.VersionConflict,
+    'The column was modified by someone else. Please refresh and try again.',
+  )
+}
+
+/**
  * Rows per request. A workspace holds 100k+ columns, so the grid holds a window over them and
  * extends it as the user scrolls; the server caps a page at 1,000 either way.
  */
@@ -188,6 +201,30 @@ export function useMetadataColumns(query: ColumnsQuery): UseMetadataColumnsResul
     [setRows, setTotalCount],
   )
 
+  /**
+   * Undoes a batch's optimistic patches, field by field. Only the fields the batch touched are
+   * undone, so a term mapping that landed on one of the rows in the meantime survives.
+   */
+  const rollBack = useCallback(
+    (entries: [string, PendingWrite][]) => {
+      for (const [columnId, write] of entries) {
+        const queued = pendingRef.current.get(columnId)
+        const revert: ColumnEdit = {}
+
+        for (const field of touchedFields(write.before)) {
+          // A newer edit to this field is already queued. It owns what the cell shows, and it
+          // carries the same confirmed baseline, so undoing it here would throw away the
+          // keystrokes the user typed while this write was in flight.
+          if (queued && field in queued.before) continue
+          revert[field] = write.before[field]
+        }
+
+        patchRow(columnId, revert)
+      }
+    },
+    [patchRow],
+  )
+
   const scheduleFlush = useCallback(() => {
     if (flushScheduledRef.current || isFlushingRef.current) return
     flushScheduledRef.current = true
@@ -223,36 +260,40 @@ export function useMetadataColumns(query: ColumnsQuery): UseMetadataColumnsResul
     try {
       const result = await bulkUpdateColumns(requests)
 
-      // The response carries each new version, so the rows are reconciled in place. Without it
-      // they would keep the versions they just spent and every later edit would conflict.
+      // The response carries each applied row's new version, so those rows are reconciled in
+      // place. Without it they would keep the versions they just spent and every later edit
+      // would conflict.
       const versions = new Map(result.columns.map(c => [c.columnId, c.version]))
       for (const [columnId] of batch) {
         const version = versions.get(columnId)
         if (version !== undefined) patchRow(columnId, { version })
       }
 
-      for (const [, write] of batch) write.resolvers.forEach(r => r.resolve())
-    } catch (err: unknown) {
-      // Undo only the fields these edits touched, so a term mapping that landed on one of the
-      // rows in the meantime survives the rollback.
-      for (const [columnId, write] of batch) {
-        const queued = pendingRef.current.get(columnId)
-        const revert: ColumnEdit = {}
+      // The rows the server declined as stale. The rest of the batch was applied, so only
+      // these are put back — one cell that moved under the user does not undo the others.
+      const declined = new Set(result.conflicts.map(c => c.columnId))
+      if (declined.size > 0) {
+        const conflicted = batch.filter(([columnId]) => declined.has(columnId))
 
-        for (const field of touchedFields(write.before)) {
-          // A newer edit to this field is already queued. It owns what the cell shows, and it
-          // carries the same confirmed baseline, so undoing it here would throw away the
-          // keystrokes the user typed while this write was in flight.
-          if (queued && field in queued.before) continue
-          revert[field] = write.before[field]
-        }
+        rollBack(conflicted)
 
-        patchRow(columnId, revert)
+        // Rolling back restores what we last saw, which is already out of date — only a
+        // refetch gets the winning values and a version the next edit can spend.
+        void refreshPagesFor(conflicted.map(([columnId]) => columnId))
       }
 
-      // Someone else wrote to a row in this batch first, and the server applied none of it.
-      // Rolling back restores what we last saw, which is already out of date — only a refetch
-      // gets the winning values and a usable version.
+      for (const [columnId, write] of batch) {
+        if (declined.has(columnId)) {
+          write.resolvers.forEach(r => r.reject(versionConflictError()))
+        } else {
+          write.resolvers.forEach(r => r.resolve())
+        }
+      }
+    } catch (err: unknown) {
+      rollBack(batch)
+
+      // The database rejected the write outright, which it cannot attribute to a single row,
+      // so the whole batch failed and every row in it needs its winning values back.
       if (err instanceof ApiError && err.code === ApiErrorCode.VersionConflict) {
         void refreshPagesFor(batch.map(([columnId]) => columnId))
       }
@@ -265,7 +306,7 @@ export function useMetadataColumns(query: ColumnsQuery): UseMetadataColumnsResul
       // Edits made while this batch was in flight are waiting on the version it just returned.
       if (pendingRef.current.size > 0) scheduleFlush()
     }
-  }, [patchRow, refreshPagesFor, scheduleFlush])
+  }, [patchRow, rollBack, refreshPagesFor, scheduleFlush])
 
   flushRef.current = () => void flush()
 

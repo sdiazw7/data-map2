@@ -90,8 +90,19 @@ export type ColumnVersion = {
   version: number
 }
 
+/** A row the server declined as stale, with the version it holds now. */
+export type ColumnConflict = {
+  columnId: string
+  currentVersion: number
+}
+
+/**
+ * The applied rows and the declined ones. A stale row does not fail the request, so a pasted
+ * range survives one cell moving under the user.
+ */
 export type BulkUpdateResponse = {
   columns: ColumnVersion[]
+  conflicts: ColumnConflict[]
 }
 
 export type ImportSummary = {

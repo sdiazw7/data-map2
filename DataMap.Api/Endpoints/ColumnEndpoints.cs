@@ -39,7 +39,7 @@ public static class ColumnEndpoints
         })
         .WithName("BulkUpdateColumns")
         .WithTags("Columns")
-        .WithSummary("Applies a batch of column edits and returns each column's new version.")
+        .WithSummary("Applies a batch of column edits, returning each applied column's new version and each stale one as a conflict.")
         .Produces<BulkUpdateResponse>()
         .ProducesAuthErrors()
         .ProducesApiErrors(

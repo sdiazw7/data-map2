@@ -198,7 +198,7 @@ public class MetadataEndpointTests(TestFixture fixture) : IClassFixture<TestFixt
             TestFixture.TestWorkspaceId,
             TestFixture.TestParticipantId,
             It.IsAny<List<ColumnUpdateRequest>>()))
-            .ReturnsAsync(new BulkUpdateResponse([new ColumnVersionDto(columnId, 2)]));
+            .ReturnsAsync(new BulkUpdateResponse([new ColumnVersionDto(columnId, 2)], []));
 
         var client = fixture.CreateAuthenticatedClient();
         var updates = new[] { new { columnId, description = "A column", exampleValue = (string?)null, owner = (string?)null, version = 1 } };
@@ -213,6 +213,39 @@ public class MetadataEndpointTests(TestFixture fixture) : IClassFixture<TestFixt
         var updated = Assert.Single(result!.Columns);
         Assert.Equal(columnId, updated.ColumnId);
         Assert.Equal(2, updated.Version);
+    }
+
+    [Fact]
+    public async Task PatchColumns_StaleRowInBatch_Returns200WithTheConflictAlongsideTheApplied()
+    {
+        var appliedId = Guid.NewGuid();
+        var staleId = Guid.NewGuid();
+        fixture.MetadataService.Setup(s => s.BulkUpdateAsync(
+            TestFixture.TestWorkspaceId,
+            TestFixture.TestParticipantId,
+            It.IsAny<List<ColumnUpdateRequest>>()))
+            .ReturnsAsync(new BulkUpdateResponse(
+                [new ColumnVersionDto(appliedId, 2)],
+                [new ColumnConflictDto(staleId, 9)]));
+
+        var client = fixture.CreateAuthenticatedClient();
+        var updates = new[]
+        {
+            new { columnId = appliedId, description = "A", exampleValue = (string?)null, owner = (string?)null, version = 1 },
+            new { columnId = staleId, description = "B", exampleValue = (string?)null, owner = (string?)null, version = 1 },
+        };
+        var response = await client.PatchAsync("/columns",
+            new StringContent(JsonSerializer.Serialize(updates), Encoding.UTF8, "application/json"));
+
+        // A stale row is part of the result, not a failure of the request — otherwise one cell
+        // that moved would discard everything else the user pasted.
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var result = await response.Content.ReadFromJsonAsync<BulkUpdateResponse>(JsonOpts);
+        Assert.Equal(appliedId, Assert.Single(result!.Columns).ColumnId);
+        var conflict = Assert.Single(result.Conflicts);
+        Assert.Equal(staleId, conflict.ColumnId);
+        Assert.Equal(9, conflict.CurrentVersion);
     }
 
     [Fact]
