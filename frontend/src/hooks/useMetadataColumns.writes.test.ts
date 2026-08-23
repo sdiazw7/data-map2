@@ -3,11 +3,17 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { BulkUpdateResponse, ColumnGridRow, ColumnUpdateRequest } from '../types/api'
 import { useMetadataColumns, PAGE_SIZE } from './useMetadataColumns'
 import { getColumns, bulkUpdateColumns } from '../services/metadataService'
+import { setColumnBusinessTerm } from '../services/businessTermService'
 import { ApiError, ApiErrorCode } from '../utils/api'
 
 vi.mock('../services/metadataService', () => ({
   getColumns: vi.fn(),
   bulkUpdateColumns: vi.fn(),
+}))
+
+vi.mock('../services/businessTermService', () => ({
+  setColumnBusinessTerm: vi.fn(),
+  clearColumnBusinessTerm: vi.fn(),
 }))
 
 function deferred<T>() {
@@ -292,6 +298,95 @@ describe('useMetadataColumns write queue', () => {
 
     await waitFor(() => expect(writes).toHaveLength(1))
     expect(writes[0].requests.map(r => r.columnId)).toEqual(['c1'])
+  })
+
+  it('holds an edit back while a term write for that row is in flight', async () => {
+    const { result } = await renderLoaded()
+
+    // The term write moves the row's version, and only its response says what to.
+    const mapping = deferred<{ columnId: string; version: number }>()
+    vi.mocked(setColumnBusinessTerm).mockReturnValue(mapping.promise)
+
+    let mapped!: Promise<void>
+    act(() => {
+      mapped = ignore(result.current.mapTerm('c1', 't1', 'Gross Revenue'))
+    })
+
+    expect(result.current.columns[0].businessTerm).toBe('Gross Revenue')
+
+    // An edit to the same row, typed before the mapping came back.
+    let edited!: Promise<void>
+    act(() => {
+      edited = ignore(result.current.editColumn('c1', { description: 'Mine' }))
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    // Sending now would spend version 1, which the mapping is about to retire.
+    expect(writes).toHaveLength(0)
+
+    await act(async () => {
+      mapping.resolve({ columnId: 'c1', version: 2 })
+      await mapped
+    })
+
+    await waitFor(() => expect(writes).toHaveLength(1))
+    expect(writes[0].requests[0]).toMatchObject({
+      columnId: 'c1',
+      description: 'Mine',
+      version: 2,
+    })
+
+    await act(async () => {
+      writes[0].settle.resolve({ columns: [{ columnId: 'c1', version: 3 }], conflicts: [] })
+      await edited
+    })
+
+    expect(result.current.columns[0].version).toBe(3)
+    expect(result.current.columns[0].businessTerm).toBe('Gross Revenue')
+  })
+
+  it('puts a failed term mapping back without disturbing the row otherwise', async () => {
+    const { result } = await renderLoaded()
+
+    const failure = new ApiError(500, 'INTERNAL_ERROR', 'An unexpected error occurred.')
+    vi.mocked(setColumnBusinessTerm).mockRejectedValue(failure)
+
+    let caught: unknown
+    await act(async () => {
+      caught = await result.current.mapTerm('c1', 't1', 'Gross Revenue').catch(e => e)
+    })
+
+    expect(caught).toBe(failure)
+    expect(result.current.columns[0].businessTerm).toBeNull()
+    expect(result.current.columns[0].version).toBe(1)
+  })
+
+  it('does not hold back edits to other rows while a term write is in flight', async () => {
+    const { result } = await renderLoaded()
+
+    const mapping = deferred<{ columnId: string; version: number }>()
+    vi.mocked(setColumnBusinessTerm).mockReturnValue(mapping.promise)
+
+    let mapped!: Promise<void>
+    act(() => {
+      mapped = ignore(result.current.mapTerm('c1', 't1', 'Gross Revenue'))
+    })
+
+    act(() => {
+      void ignore(result.current.editColumn('c2', { description: 'Other row' }))
+    })
+
+    // Only c1's version is in play, so c2 has nothing to wait for.
+    await waitFor(() => expect(writes).toHaveLength(1))
+    expect(writes[0].requests.map(r => r.columnId)).toEqual(['c2'])
+
+    await act(async () => {
+      mapping.resolve({ columnId: 'c1', version: 2 })
+      await mapped
+    })
   })
 
   it('reconciles a whole batch in one pass over the window', async () => {

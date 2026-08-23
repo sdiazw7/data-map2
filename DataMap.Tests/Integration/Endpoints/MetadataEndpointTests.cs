@@ -279,6 +279,63 @@ public class MetadataEndpointTests(TestFixture fixture) : IClassFixture<TestFixt
         AssertErrorCode(await response.Content.ReadAsStringAsync(), "MALFORMED_REQUEST");
     }
 
+    // ── GET /columns/{columnId}/changes ──────────────────────────────────────
+
+    [Fact]
+    public async Task GetColumnChanges_Returns200WithTheRecordedEdits()
+    {
+        var columnId = Guid.NewGuid();
+        var editedAt = new DateTime(2026, 8, 23, 10, 0, 0, DateTimeKind.Utc);
+        fixture.MetadataService.Setup(s => s.GetColumnHistoryAsync(
+            TestFixture.TestWorkspaceId, columnId, It.IsAny<PageQuery>()))
+            .ReturnsAsync(new PagedResult<MetadataChangeDto>(
+                [new MetadataChangeDto(Guid.NewGuid(), "Owner", "ana", "bob", "ana@example.com", editedAt)],
+                1, 50, 0));
+
+        var client = fixture.CreateAuthenticatedClient();
+        var response = await client.GetAsync($"/columns/{columnId}/changes");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var result = await response.Content.ReadFromJsonAsync<PagedResult<MetadataChangeDto>>(JsonOpts);
+        var entry = Assert.Single(result!.Items);
+        Assert.Equal("Owner", entry.Field);
+        Assert.Equal("ana", entry.OldValue);
+        Assert.Equal("bob", entry.NewValue);
+        Assert.Equal("ana@example.com", entry.EditedByEmail);
+    }
+
+    [Fact]
+    public async Task GetColumnChanges_PassesThePagingArgumentsThrough()
+    {
+        var columnId = Guid.NewGuid();
+        fixture.MetadataService.Setup(s => s.GetColumnHistoryAsync(
+            TestFixture.TestWorkspaceId, columnId, It.IsAny<PageQuery>()))
+            .ReturnsAsync(new PagedResult<MetadataChangeDto>([], 0, 25, 50));
+
+        var client = fixture.CreateAuthenticatedClient();
+        await client.GetAsync($"/columns/{columnId}/changes?limit=25&offset=50");
+
+        fixture.MetadataService.Verify(s => s.GetColumnHistoryAsync(
+            TestFixture.TestWorkspaceId, columnId,
+            It.Is<PageQuery>(p => p.Limit == 25 && p.Offset == 50)), Times.Once);
+    }
+
+    [Fact]
+    public async Task GetColumnChanges_ColumnNotFound_Returns404()
+    {
+        var columnId = Guid.NewGuid();
+        fixture.MetadataService.Setup(s => s.GetColumnHistoryAsync(
+            TestFixture.TestWorkspaceId, columnId, It.IsAny<PageQuery>()))
+            .ThrowsAsync(new ColumnNotFoundException());
+
+        var client = fixture.CreateAuthenticatedClient();
+        var response = await client.GetAsync($"/columns/{columnId}/changes");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        AssertErrorCode(await response.Content.ReadAsStringAsync(), "COLUMN_NOT_FOUND");
+    }
+
     // ── GET /coverage ────────────────────────────────────────────────────────
 
     [Fact]

@@ -46,6 +46,25 @@ public static class ColumnEndpoints
             StatusCodes.Status400BadRequest,
             StatusCodes.Status409Conflict);
 
+        app.MapGet("/columns/{columnId:guid}/changes", async (
+            Guid columnId,
+            HttpContext ctx,
+            IMetadataService svc,
+            int limit = 50,
+            int offset = 0) =>
+        {
+            var result = await svc.GetColumnHistoryAsync(ctx.WorkspaceId(), columnId, new PageQuery(limit, offset));
+            return Results.Ok(result);
+        })
+        .WithName("ListColumnChanges")
+        .WithTags("Columns")
+        .WithSummary("Lists the column's recorded edits, newest first.")
+        .Produces<PagedResult<MetadataChangeDto>>()
+        .ProducesAuthErrors()
+        .ProducesApiErrors(
+            StatusCodes.Status400BadRequest,
+            StatusCodes.Status404NotFound);
+
         app.MapPut("/columns/{columnId:guid}/business-term", async (
             Guid columnId,
             BusinessTermMappingRequest req,

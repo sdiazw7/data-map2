@@ -11,4 +11,8 @@ public interface IMetadataService
 
     Task<CoverageResponse> GetCoverageAsync(Guid workspaceId);
     Task<PagedResult<string>> GetTableNamesAsync(Guid workspaceId, PageQuery page);
+
+    /// <summary>One column's recorded edits, newest first.</summary>
+    Task<PagedResult<MetadataChangeDto>> GetColumnHistoryAsync(
+        Guid workspaceId, Guid columnId, PageQuery page);
 }

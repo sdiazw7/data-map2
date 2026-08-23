@@ -105,6 +105,19 @@ export type BulkUpdateResponse = {
   conflicts: ColumnConflict[]
 }
 
+/** One recorded edit to a column, as the history panel shows it. */
+export type MetadataChange = {
+  id: string
+  /** The column property that changed, e.g. "Description" or "BusinessTerm". */
+  field: string
+  oldValue: string | null
+  newValue: string | null
+  /** Invite-based access has no display names, so the email is the identity there is to show. */
+  editedByEmail: string
+  /** ISO-8601, UTC. */
+  editedAt: string
+}
+
 export type ImportSummary = {
   rows: number
   schemas: number

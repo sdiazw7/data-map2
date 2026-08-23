@@ -5,7 +5,6 @@ import { useMetadataColumns } from '../../hooks/useMetadataColumns'
 import { useBusinessTerms } from '../../hooks/useBusinessTerms'
 import { useTableNames } from '../../hooks/useTableNames'
 import type { ColumnEdit, ColumnEdits } from '../../utils/columnFields'
-import { setColumnBusinessTerm, clearColumnBusinessTerm } from '../../services/businessTermService'
 import type { SortField, SortDir } from '../../services/metadataService'
 import { ApiError, ApiErrorCode } from '../../utils/api'
 import CoverageBanner from '../coverage/CoverageBanner'
@@ -13,6 +12,7 @@ import GridToolbar from '../grid/GridToolbar'
 import MetadataGrid from '../grid/MetadataGrid'
 import CsvUploadModal from '../upload/CsvUploadModal'
 import BusinessTermsPanel from '../terms/BusinessTermsPanel'
+import ColumnHistoryPanel from '../history/ColumnHistoryPanel'
 import LoadingSpinner from '../ui/LoadingSpinner'
 import ErrorMessage from '../ui/ErrorMessage'
 import Toast from '../ui/Toast'
@@ -47,6 +47,9 @@ export default function WorkspacePage() {
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [uploadOpen, setUploadOpen] = useState(false)
   const [termsOpen, setTermsOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  // The grid owns the selection; the page only needs the row it is on, to scope the history.
+  const [activeColumnId, setActiveColumnId] = useState<string | null>(null)
   const [toast, setToast] = useState<{ message: string; variant: ToastVariant } | null>(null)
 
   const { coverage, reload: reloadCoverage } = useCoverage()
@@ -60,7 +63,7 @@ export default function WorkspacePage() {
     reload: reloadColumns,
     editColumn,
     editColumns,
-    applyTerm,
+    mapTerm,
   } = useMetadataColumns({
     search,
     undocumentedOnly,
@@ -90,28 +93,21 @@ export default function WorkspacePage() {
     [editColumn, reloadCoverage],
   )
 
-  const handleTermMap = useCallback(async (columnId: string, termId: string) => {
-    // The empty option in the term cell means "no term", which is a delete, not a mapping.
-    const termName = termId ? terms.find(t => t.id === termId)?.name ?? null : null
+  const handleTermMap = useCallback(
+    async (columnId: string, termId: string, termName: string | null) => {
+      try {
+        await mapTerm(columnId, termId, termName)
+        reloadCoverage()
+      } catch (err: unknown) {
+        setToast({ message: editErrorMessage(err), variant: 'error' })
+      }
+    },
+    [mapTerm, reloadCoverage],
+  )
 
-    // Applied first so the cell moves with the click; applyTerm hands back what it replaced.
-    const previous = applyTerm(columnId, termName)
-
-    try {
-      const result = termId
-        ? await setColumnBusinessTerm(columnId, termId)
-        : await clearColumnBusinessTerm(columnId)
-
-      // The mapping moved the row's version. Without taking the new one the next edit to this
-      // row would spend a version the server has already retired, and be rejected as stale.
-      applyTerm(columnId, termName, result.version)
-
-      reloadCoverage()
-    } catch (err: unknown) {
-      applyTerm(columnId, previous)
-      setToast({ message: editErrorMessage(err), variant: 'error' })
-    }
-  }, [terms, applyTerm, reloadCoverage])
+  const activeColumn = activeColumnId
+    ? columns.find(row => row.columnId === activeColumnId) ?? null
+    : null
 
   const handlePasteEdits = useCallback(
     async (edits: ColumnEdits, skippedRows: number) => {
@@ -175,6 +171,8 @@ export default function WorkspacePage() {
           onUndocumentedOnlyChange={setUndocumentedOnly}
           onUploadClick={() => setUploadOpen(true)}
           onBusinessTermsClick={() => setTermsOpen(true)}
+          onHistoryClick={() => setHistoryOpen(true)}
+          canShowHistory={activeColumnId !== null}
           tableNames={tableNames}
           selectedTable={tableName}
           onTableChange={setTableName}
@@ -204,6 +202,7 @@ export default function WorkspacePage() {
             isLoadingMore={isLoadingMore}
             onTermMap={handleTermMap}
           onPasteEdits={handlePasteEdits}
+          onActiveRowChange={setActiveColumnId}
             sortBy={sortBy}
             sortDir={sortDir}
             onSortChange={handleSortChange}
@@ -224,6 +223,19 @@ export default function WorkspacePage() {
 
       {toast && (
         <Toast message={toast.message} variant={toast.variant} onDismiss={() => setToast(null)} />
+      )}
+
+      {historyOpen && activeColumn && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setHistoryOpen(false)} />
+          <div className="relative w-full max-w-sm bg-white shadow-xl overflow-y-auto">
+            <ColumnHistoryPanel
+              columnId={activeColumn.columnId}
+              columnName={`${activeColumn.tableName}.${activeColumn.columnName}`}
+              onClose={() => setHistoryOpen(false)}
+            />
+          </div>
+        </div>
       )}
 
       {termsOpen && (

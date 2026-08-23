@@ -5,6 +5,9 @@ type Props = {
   onUndocumentedOnlyChange: (value: boolean) => void
   onUploadClick: () => void
   onBusinessTermsClick: () => void
+  onHistoryClick: () => void
+  /** History is scoped to one column, so there is nothing to open without a selected cell. */
+  canShowHistory: boolean
   tableNames: string[]
   selectedTable: string
   onTableChange: (value: string) => void
@@ -19,6 +22,8 @@ export default function GridToolbar({
   onUndocumentedOnlyChange,
   onUploadClick,
   onBusinessTermsClick,
+  onHistoryClick,
+  canShowHistory,
   tableNames,
   selectedTable,
   onTableChange,
@@ -69,6 +74,15 @@ export default function GridToolbar({
           : `${totalCount.toLocaleString()} ${totalCount === 1 ? 'column' : 'columns'}`}
       </span>
       <div className="ml-auto flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onHistoryClick}
+          disabled={!canShowHistory}
+          title={canShowHistory ? undefined : 'Select a cell to see that column’s history'}
+          className="px-3 py-1.5 border border-gray-300 text-gray-700 text-sm rounded hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white"
+        >
+          History
+        </button>
         <button
           type="button"
           onClick={onBusinessTermsClick}

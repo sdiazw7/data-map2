@@ -4,6 +4,7 @@ import type {
   ColumnUpdateRequest,
   CoverageResponse,
   ImportSummary,
+  MetadataChange,
   PagedResult,
 } from '../types/api'
 import { apiFetch, toApiError } from '../utils/api'
@@ -65,6 +66,17 @@ export async function importCsv(file: File): Promise<ImportSummary> {
     throw await toApiError(res)
   }
   return (await res.json()) as ImportSummary
+}
+
+/** One column's recorded edits, newest first. */
+export async function getColumnHistory(
+  columnId: string,
+  limit = 50,
+  offset = 0,
+): Promise<PagedResult<MetadataChange>> {
+  return apiFetch<PagedResult<MetadataChange>>(
+    `/columns/${columnId}/changes?limit=${limit}&offset=${offset}`,
+  )
 }
 
 export async function getCoverage(): Promise<CoverageResponse> {

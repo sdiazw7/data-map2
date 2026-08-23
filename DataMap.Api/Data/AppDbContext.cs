@@ -58,8 +58,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<Invite>()
             .HasIndex(i => i.Token);
 
+        // History is read one entity at a time, newest first. Leading with EntityId (highly
+        // selective) and trailing with EditedAt lets Postgres serve the filter, the ORDER BY
+        // and the LIMIT from one index scan. A standalone EntityId index would be a redundant
+        // prefix of this one.
         modelBuilder.Entity<MetadataChange>()
-            .HasIndex(m => m.EntityId);
+            .HasIndex(m => new { m.EntityId, m.EditedAt });
 
         // One index per grid sort key. Each leads with WorkspaceId (every query filters
         // on it) and trails with ColumnId (the pagination tie-breaker), so Postgres can

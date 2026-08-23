@@ -24,12 +24,14 @@ type Props = {
   /** Asked for as the user nears the end of what is loaded. */
   onLoadMore: () => void
   isLoadingMore: boolean
-  onTermMap: (columnId: string, termId: string) => void
+  onTermMap: (columnId: string, termId: string, termName: string | null) => void
   /**
    * A pasted range, already laid over the loaded rows. `skippedRows` counts the pasted rows
    * that fell past the end of the window and so had nowhere to go.
    */
   onPasteEdits: (edits: ColumnEdits, skippedRows: number) => void
+  /** The row the selection is on, so the page can offer actions scoped to it. */
+  onActiveRowChange: (columnId: string | null) => void
   sortBy: SortField
   sortDir: SortDir
   onSortChange: (field: SortField) => void
@@ -49,6 +51,7 @@ export default function MetadataGrid({
   onEdit,
   onTermMap,
   onPasteEdits,
+  onActiveRowChange,
   total,
   onLoadMore,
   isLoadingMore,
@@ -147,7 +150,7 @@ export default function MetadataGrid({
           <BusinessTermCell
             value={row.original.businessTerm}
             terms={terms}
-            onChange={termId => onTermMap(row.original.columnId, termId)}
+            onChange={(termId, termName) => onTermMap(row.original.columnId, termId, termName)}
           />
         ),
       }),
@@ -209,6 +212,12 @@ export default function MetadataGrid({
     // The virtualizer is a fresh object each render; following the row is what matters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active?.rowIndex])
+
+  const activeColumnId = active ? rows[active.rowIndex]?.columnId ?? null : null
+
+  useEffect(() => {
+    onActiveRowChange(activeColumnId)
+  }, [activeColumnId, onActiveRowChange])
 
   // The editor takes focus while it is open, and the grid needs it back afterwards or the next
   // arrow key goes to the document. preventScroll because the scroll position is the

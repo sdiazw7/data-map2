@@ -28,6 +28,9 @@ public class MetadataService(
     // Table names are one row per distinct table, so the ceiling is lower than the grid's.
     private const int MaxTableNameLimit = 5_000;
 
+    // History is read one column at a time in a panel, so a page is small by nature.
+    private const int MaxHistoryLimit = 200;
+
     // Bulk edit bounds. The grid pastes in chunks; this caps one request, not one session.
     private const int MaxBulkUpdateRows = 5_000;
     private const int MaxDescriptionLength = 4_000;
@@ -148,6 +151,32 @@ public class MetadataService(
         var (total, documented) = await projectionRepo.GetCoverageCountsAsync(workspaceId);
         var percent = total == 0 ? 0.0 : Math.Round((double)documented / total * 100, 1);
         return new CoverageResponse(total, documented, percent);
+    }
+
+    public async Task<PagedResult<MetadataChangeDto>> GetColumnHistoryAsync(
+        Guid workspaceId, Guid columnId, PageQuery page)
+    {
+        RequirePaging(page.Limit, page.Offset, MaxHistoryLimit);
+
+        // A change record carries no workspace of its own, so the column is what scopes the
+        // query. Without this check a participant could read another workspace's edit history,
+        // including the values and the email of whoever wrote them.
+        var column = await columnRepo.GetByIdAsync(workspaceId, columnId);
+        if (column is null)
+            throw new ColumnNotFoundException();
+
+        var (changes, total) = await changeRepo.GetByColumnAsync(columnId, page.Limit, page.Offset);
+
+        var items = changes.Select(c => new MetadataChangeDto(
+            c.Id,
+            c.Field,
+            c.OldValue,
+            c.NewValue,
+            c.Participant.Email,
+            c.EditedAt
+        )).ToList();
+
+        return new PagedResult<MetadataChangeDto>(items, total, page.Limit, page.Offset);
     }
 
     public async Task<PagedResult<string>> GetTableNamesAsync(Guid workspaceId, PageQuery page)

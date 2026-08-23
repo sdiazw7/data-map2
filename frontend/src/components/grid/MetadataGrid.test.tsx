@@ -55,6 +55,7 @@ function renderGrid() {
       isLoadingMore={false}
       onTermMap={vi.fn()}
       onPasteEdits={onPasteEdits}
+      onActiveRowChange={vi.fn()}
       sortBy="columnName"
       sortDir="asc"
       onSortChange={vi.fn()}

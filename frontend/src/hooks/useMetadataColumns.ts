@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import type { ColumnGridRow, ColumnUpdateRequest } from '../types/api'
 import type { ColumnsQuery } from '../services/metadataService'
 import { getColumns, bulkUpdateColumns } from '../services/metadataService'
+import { setColumnBusinessTerm, clearColumnBusinessTerm } from '../services/businessTermService'
 import { ApiError, ApiErrorCode } from '../utils/api'
 import type { ColumnEdit, ColumnEdits } from '../utils/columnFields'
 import { touchedFields } from '../utils/columnFields'
@@ -73,6 +74,13 @@ type UseMetadataColumnsResult = {
    * undo it. Called again with the version the server returned once the write has landed.
    */
   applyTerm: (columnId: string, termName: string | null, version?: number) => string | null
+  /**
+   * Maps a business term onto a row, or clears it when termId is empty. Shows the change
+   * immediately and takes it back if the write fails, rejecting with the {@link ApiError}.
+   * Ordered against the edit queue: both this and a grid edit move the row's version, so one
+   * waits for the other rather than spending a version the server has already retired.
+   */
+  mapTerm: (columnId: string, termId: string, termName: string | null) => Promise<void>
 }
 
 export function useMetadataColumns(query: ColumnsQuery): UseMetadataColumnsResult {
@@ -107,6 +115,13 @@ export function useMetadataColumns(query: ColumnsQuery): UseMetadataColumnsResul
   const isFlushingRef = useRef(false)
   const flushScheduledRef = useRef(false)
   const flushRef = useRef<() => void>(() => {})
+
+  // Rows with a business-term write in flight. A term mapping moves the row's version too, so
+  // a queued edit has to wait for it rather than spend a version the server is about to retire.
+  const termWritesRef = useRef(new Set<string>())
+
+  // Settles when the batch being written finishes, so a term write can wait its turn behind it.
+  const inFlightDoneRef = useRef<Promise<void> | null>(null)
 
   const setRows = useCallback(
     (next: ColumnGridRow[] | ((prev: ColumnGridRow[]) => ColumnGridRow[])) => {
@@ -257,10 +272,21 @@ export function useMetadataColumns(query: ColumnsQuery): UseMetadataColumnsResul
     flushScheduledRef.current = false
     if (isFlushingRef.current || pendingRef.current.size === 0) return
 
-    const batch = [...pendingRef.current.entries()]
-    pendingRef.current.clear()
+    // A row with a term write in the air is left on the queue: that write moves its version,
+    // and the value it returns is the one the next edit has to carry.
+    const batch = [...pendingRef.current.entries()].filter(
+      ([columnId]) => !termWritesRef.current.has(columnId),
+    )
+    if (batch.length === 0) return
+
+    for (const [columnId] of batch) pendingRef.current.delete(columnId)
     inFlightRef.current = new Map(batch)
     isFlushingRef.current = true
+
+    let releaseInFlight!: () => void
+    inFlightDoneRef.current = new Promise<void>(resolve => {
+      releaseInFlight = resolve
+    })
 
     // The version is read here and not when the edit was made. An edit typed while an earlier
     // write for the same row was still in flight would otherwise carry the version that write
@@ -328,6 +354,8 @@ export function useMetadataColumns(query: ColumnsQuery): UseMetadataColumnsResul
     } finally {
       inFlightRef.current = new Map()
       isFlushingRef.current = false
+      inFlightDoneRef.current = null
+      releaseInFlight()
 
       // Edits made while this batch was in flight are waiting on the version it just returned.
       if (pendingRef.current.size > 0) scheduleFlush()
@@ -420,6 +448,40 @@ export function useMetadataColumns(query: ColumnsQuery): UseMetadataColumnsResul
     [patchRow],
   )
 
+  const mapTerm = useCallback(
+    async (columnId: string, termId: string, termName: string | null): Promise<void> => {
+      // Applied first so the cell moves with the click; applyTerm hands back what it replaced.
+      const previous = applyTerm(columnId, termName)
+
+      // Held from here rather than after the await, so a flush scheduled in between sees it.
+      termWritesRef.current.add(columnId)
+
+      try {
+        // A grid write for this row may already be in the air. Both writes move the version, so
+        // they have to be ordered — otherwise the second reads a version the first has spent.
+        if (inFlightRef.current.has(columnId) && inFlightDoneRef.current) {
+          await inFlightDoneRef.current
+        }
+
+        // The empty option in the term cell means "no term", which is a delete, not a mapping.
+        const result = termId
+          ? await setColumnBusinessTerm(columnId, termId)
+          : await clearColumnBusinessTerm(columnId)
+
+        applyTerm(columnId, termName, result.version)
+      } catch (err: unknown) {
+        applyTerm(columnId, previous)
+        throw err
+      } finally {
+        termWritesRef.current.delete(columnId)
+
+        // Edits held back while this was in flight can go now, carrying the version it returned.
+        if (pendingRef.current.size > 0) scheduleFlush()
+      }
+    },
+    [applyTerm, scheduleFlush],
+  )
+
   useEffect(() => {
     // Opening a generation retires any page still in flight for the previous filters.
     const generation = ++generationRef.current
@@ -463,5 +525,6 @@ export function useMetadataColumns(query: ColumnsQuery): UseMetadataColumnsResul
     editColumn,
     editColumns,
     applyTerm,
+    mapTerm,
   }
 }

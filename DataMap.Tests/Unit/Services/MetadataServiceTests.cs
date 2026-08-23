@@ -202,6 +202,73 @@ public class MetadataServiceTests
         _projectionRepo.Verify(r => r.QueryAsync(workspaceId, 1000, 0, null, false, null, "columnName", "asc"), Times.Once);
     }
 
+    // ── GetColumnHistoryAsync ────────────────────────────────────────────────
+
+    [Fact]
+    public async Task GetColumnHistoryAsync_ReturnsChangesWithTheEditorsEmail()
+    {
+        var workspaceId = Guid.NewGuid();
+        var columnId = Guid.NewGuid();
+        var changeId = Guid.NewGuid();
+        var editedAt = new DateTime(2026, 8, 23, 10, 0, 0, DateTimeKind.Utc);
+        SetupColumns(workspaceId, new Column { Id = columnId, WorkspaceId = workspaceId });
+        _columnRepo.Setup(r => r.GetByIdAsync(workspaceId, columnId))
+            .ReturnsAsync(new Column { Id = columnId, WorkspaceId = workspaceId });
+
+        _changeRepo.Setup(r => r.GetByColumnAsync(columnId, 50, 0))
+            .ReturnsAsync((new List<MetadataChange>
+            {
+                new()
+                {
+                    Id = changeId,
+                    EntityType = "Column",
+                    EntityId = columnId,
+                    Field = "Description",
+                    OldValue = "old",
+                    NewValue = "new",
+                    EditedAt = editedAt,
+                    Participant = new Participant { Email = "ana@example.com" },
+                }
+            }, 1));
+
+        var result = await CreateService().GetColumnHistoryAsync(
+            workspaceId, columnId, new PageQuery(50, 0));
+
+        var entry = Assert.Single(result.Items);
+        Assert.Equal(changeId, entry.Id);
+        Assert.Equal("Description", entry.Field);
+        Assert.Equal("old", entry.OldValue);
+        Assert.Equal("new", entry.NewValue);
+        Assert.Equal("ana@example.com", entry.EditedByEmail);
+        Assert.Equal(editedAt, entry.EditedAt);
+        Assert.Equal(1, result.Total);
+    }
+
+    [Fact]
+    public async Task GetColumnHistoryAsync_ColumnInAnotherWorkspace_ThrowsColumnNotFound()
+    {
+        // A change record carries no workspace of its own, so the column is the only thing
+        // scoping this. Without the check a participant could read another workspace's edits,
+        // including the values and the email of whoever wrote them.
+        var workspaceId = Guid.NewGuid();
+        var columnId = Guid.NewGuid();
+        _columnRepo.Setup(r => r.GetByIdAsync(workspaceId, columnId)).ReturnsAsync((Column?)null);
+
+        await Assert.ThrowsAsync<ColumnNotFoundException>(() =>
+            CreateService().GetColumnHistoryAsync(workspaceId, columnId, new PageQuery(50, 0)));
+
+        _changeRepo.Verify(r => r.GetByColumnAsync(
+            It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<int>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetColumnHistoryAsync_LimitAboveTheCeiling_ThrowsValidationException()
+    {
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            CreateService().GetColumnHistoryAsync(
+                Guid.NewGuid(), Guid.NewGuid(), new PageQuery(5_000, 0)));
+    }
+
     // ── BulkUpdateAsync ──────────────────────────────────────────────────────
 
     [Fact]
